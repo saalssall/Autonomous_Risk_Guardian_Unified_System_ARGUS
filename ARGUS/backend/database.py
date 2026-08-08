@@ -2,7 +2,14 @@ from sqlalchemy import create_engine, Column, Float, String, Integer, DateTime, 
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
 import datetime
-SQLALCHEMY_DATABASE_URL = "sqlite:///./argus.db"
+import os
+
+# ADDED: configurable via env var so a Docker volume can be mounted at a
+# stable path and survive container restarts. Defaults to "." — the exact
+# previous behavior — for local (non-Docker) runs.
+DATA_DIR = os.environ.get("ARGUS_DATA_DIR", ".")
+os.makedirs(DATA_DIR, exist_ok=True)
+SQLALCHEMY_DATABASE_URL = f"sqlite:///{DATA_DIR}/argus.db"
 engine = create_engine(
     SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False}
 )

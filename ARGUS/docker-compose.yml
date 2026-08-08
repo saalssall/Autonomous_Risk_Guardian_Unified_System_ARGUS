@@ -13,6 +13,12 @@ services:
       dockerfile: backend/Dockerfile
     ports:
       - "8000:8000"
+    environment:
+      - ARGUS_DATA_DIR=/app/data
+      - ARGUS_UPLOAD_DIR=/app/uploads
+    volumes:
+      - argus-data:/app/data
+      - argus-uploads:/app/uploads
 
   camera:
     build:
@@ -24,3 +30,7 @@ services:
       - /dev/video0:/dev/video0
     depends_on:
       - backend
+
+volumes:
+  argus-data:
+  argus-uploads:

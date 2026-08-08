@@ -23,7 +23,10 @@ app.add_middleware(
 )
 
 # Ensure upload directory exists for camera images
-UPLOAD_DIR = "uploads"
+# ADDED: configurable, same reasoning as DATA_DIR in database.py — otherwise
+# a persisted database (via a volume) would end up with image_url rows
+# pointing at files that vanish every time the container restarts.
+UPLOAD_DIR = os.environ.get("ARGUS_UPLOAD_DIR", "uploads")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 # ADDED: without this, image_url values stored in the DB (e.g. "uploads/x.jpg")
