@@ -21,7 +21,10 @@ import os
 
 import database
 
-CONFIG_PATH = os.path.join(os.path.dirname(__file__), "..", "argus_config.json")
+CONFIG_PATH = os.environ.get(
+    "ARGUS_CONFIG_PATH",
+    os.path.join(os.path.dirname(__file__), "..", "argus_config.json"),
+)
 BASELINE_WINDOW = 10  # how many previous readings to use for the rolling baseline
 EPSILON = 1e-6  # avoids divide-by-zero when a sensor's readings haven't varied yet
 

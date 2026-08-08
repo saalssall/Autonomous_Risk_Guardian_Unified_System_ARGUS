@@ -1,0 +1,26 @@
+# Usage: docker compose up backend
+#   (build context is the project root, since backend/Dockerfile needs
+#   argus_config.json from outside the backend/ folder)
+#
+# The camera service is included for completeness but only really useful
+# on Linux/the Raspberry Pi — see pi-server/Dockerfile's comment on why
+# camera passthrough doesn't work from Docker Desktop on macOS/Windows.
+# On a Mac, keep running camera_uploader.py directly instead of via compose.
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    ports:
+      - "8000:8000"
+
+  camera:
+    build:
+      context: ./pi-server
+    environment:
+      - BACKEND_URL=http://backend:8000
+      - NODE_ID=ARGUS-01
+    devices:
+      - /dev/video0:/dev/video0
+    depends_on:
+      - backend
