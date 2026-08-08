@@ -1,4 +1,4 @@
-opencv-python
-ultralytics
-websockets
-aiohttp
+fastapi
+uvicorn[standard]
+sqlalchemy
+python-multipart

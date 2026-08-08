@@ -1,24 +1,30 @@
 # Disaster recovery sensor node
 
-Three independent pieces, tied together by WebSocket at runtime — not by any shared code.
+Four pieces. ESP32 and the camera pipeline both POST data to the backend;
+the dashboard polls the backend over REST (no WebSocket in this version).
 
 ```
-dashboard/           React app (Vite) — the operator UI
-pi-server/           Python — runs on the Raspberry Pi, does YOLO detection + relays sensor data
-esp32-sensor-node/   PlatformIO project — ESP32 firmware reading the sensors
+backend/              FastAPI + SQLite — stores everything, serves it back over REST
+dashboard/             React app (Vite) — polls the backend, shows the operator UI
+pi-server/             Python — camera_uploader.py posts snapshots to the backend
+esp32-sensor-node/     PlatformIO project — ESP32 firmware POSTs sensor readings
 ```
+
+`pi-server/server.py`, `detect_server.py`, and `mock_sensor.py` are from an
+earlier WebSocket-based architecture and are no longer used by anything else
+here — kept in case they're wanted as a fallback, otherwise safe to delete.
 
 ## Running everything
 
-Open `disaster-recovery.code-workspace` in VS Code — this shows all three folders
-in one window without merging their configs (each keeps its own venv/node_modules/
-PlatformIO settings).
+Open `disaster-recovery.code-workspace` in VS Code — shows all folders in
+one window without merging their configs.
 
-**pi-server** (run this first):
+**backend** (run this first):
 ```
-cd pi-server
+cd backend
+python3 -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
-python3 detect_server.py
+uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
 **dashboard**:
@@ -27,8 +33,16 @@ cd dashboard
 npm install
 npm run dev
 ```
-Then connect it to `ws://localhost:8765` (or the Pi's IP once it's running there).
+Connect it to `http://localhost:8000` with node ID `ARGUS-01` (or whatever
+node ID the ESP32/camera pipeline are using — they must all match).
+
+**pi-server** (camera pipeline):
+```
+cd pi-server
+pip install -r requirements.txt
+python3 camera_uploader.py
+```
 
 **esp32-sensor-node**:
-Open the `esp32-sensor-node` folder in PlatformIO, fill in Wi-Fi credentials and
-`PI_HOST` in `src/main.cpp`, then build + upload.
+Open the folder in PlatformIO, fill in Wi-Fi credentials and `BACKEND_HOST`
+in `src/main.cpp`, then build + upload.
