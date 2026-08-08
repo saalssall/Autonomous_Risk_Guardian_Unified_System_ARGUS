@@ -68,6 +68,7 @@ class RiskAssessmentModel(Base):
     risk_level = Column(String, nullable=False)  # LOW, GUARDED, ELEVATED, HIGH, CRITICAL
     confidence = Column(Float, nullable=False)
     trend = Column(String, nullable=True)  # ADDED — increasing / decreasing / steady
+    disaster_profile = Column(String, nullable=True)  # ADDED — which weight profile was used: general/flood/heat
     explanation = Column(String, nullable=True)  
     recommendation = Column(String, nullable=False)
     node = relationship("NodeModel")

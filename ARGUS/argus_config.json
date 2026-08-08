@@ -6,14 +6,33 @@
     "HIGH": [60, 79],
     "CRITICAL": [80, 100]
   },
-  "risk_weights": {
-    "temperature": 0.25,
-    "humidity": 0.15,
-    "distance": 0.25,
-    "rate_of_change": 0.15,
-    "spatial": 0.10,
-    "historical": 0.10
+  "disaster_profiles": {
+    "general": {
+      "temperature": 0.25,
+      "humidity": 0.15,
+      "distance": 0.25,
+      "rate_of_change": 0.15,
+      "spatial": 0.10,
+      "historical": 0.10
+    },
+    "flood": {
+      "distance": 0.40,
+      "humidity": 0.15,
+      "temperature": 0.10,
+      "rate_of_change": 0.15,
+      "spatial": 0.10,
+      "historical": 0.10
+    },
+    "heat": {
+      "temperature": 0.40,
+      "humidity": 0.20,
+      "rate_of_change": 0.15,
+      "distance": 0.05,
+      "spatial": 0.10,
+      "historical": 0.10
+    }
   },
+  "camera_weight": 0.15,
   "health_levels": {
     "HEALTHY": [90, 100],
     "DEGRADED": [70, 89],

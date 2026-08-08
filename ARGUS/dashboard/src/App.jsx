@@ -9,7 +9,10 @@ import { CameraObservationPanel } from "./components/argus/CameraObservationPane
 import { useAuthorityData } from "./hooks/useAuthorityData";
 import "./App.css";
 
-const BACKEND_URL = "http://localhost:8000"; // change if the backend runs elsewhere
+// Reads VITE_BACKEND_URL at build time (set this in Vercel's project
+// settings once the backend has a public URL). Falls back to localhost
+// for local development, where nothing needs to be set.
+const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || "http://localhost:8000";
 
 export default function App() {
   const {

@@ -1,20 +1,24 @@
 """
 ARGUS risk engine — Person 2's math, implemented.
 
-For each new sensor reading, computes a real per-node risk assessment:
+For each new sensor reading (or camera observation), computes a real
+per-node risk assessment:
   1. OBSERVATION — the raw reading itself (already stored by main.py)
   2. ANOMALY — how far each measurement is from this node's own recent
      baseline (rolling mean/std over its last N readings), as a z-score
   3. RISK — the anomaly scores combined with a rate-of-change signal, a
-     spatial-agreement signal (do other nodes show similar deviation), and
-     a historical-similarity signal (has this node been high-risk under
-     similar conditions before) — weighted per argus_config.json, then
-     bucketed into a risk_level via the same config
-  4. CONFIDENCE — how much history this assessment is actually resting on
+     spatial-agreement signal (do other nodes show similar deviation), a
+     historical-similarity signal, and camera evidence if any — weighted
+     per a DISASTER PROFILE selected from the inferred hazard (general/
+     flood/heat — see argus_config.json's disaster_profiles), then bucketed
+     into a risk_level via the same config
+  4. CONFIDENCE — blends how much history this assessment rests on with
+     how reliable the reporting device currently is
 
 This deliberately does NOT call a raw measurement itself "high risk" — see
-argus_config.json's risk_weights for exactly how much each factor counts.
+argus_config.json for exactly how much each factor counts, per profile.
 """
+import datetime
 import json
 import math
 import os
@@ -26,6 +30,8 @@ CONFIG_PATH = os.environ.get(
     os.path.join(os.path.dirname(__file__), "..", "argus_config.json"),
 )
 BASELINE_WINDOW = 10  # how many previous readings to use for the rolling baseline
+CAMERA_RELEVANCE_S = 300  # ignore camera detections older than this — a smoke
+                          # sighting from an hour ago shouldn't keep inflating risk
 EPSILON = 1e-6  # avoids divide-by-zero when a sensor's readings haven't varied yet
 
 with open(CONFIG_PATH) as f:
@@ -66,6 +72,23 @@ def _rate_of_change_score(current, previous, history_values):
     std = math.sqrt(sum((x - sum(history_values) / len(history_values)) ** 2 for x in history_values) / len(history_values))
     delta = current - previous
     return min(abs(delta) / (std + EPSILON) / 3.0, 1.0)
+
+
+def _real_rate_per_30min(current, previous_value, current_ts, previous_ts):
+    """Real-units rate (e.g. °C per 30 min), for human display — separate
+    from _rate_of_change_score above, which is normalized 0-1 for scoring.
+    Returns None if there's nothing to compare against, or if the two
+    readings are too close together in time to extrapolate a stable rate
+    (dividing by a near-zero time delta blows the result up to nonsense —
+    e.g. two readings 5ms apart implying millions of degrees per 30 min)."""
+    if previous_value is None or previous_ts is None or current_ts is None:
+        return None
+    delta_minutes = (current_ts - previous_ts).total_seconds() / 60.0
+    MIN_DELTA_MINUTES = 0.1  # ~6 seconds — below this, don't extrapolate
+    if delta_minutes < MIN_DELTA_MINUTES:
+        return None
+    rate_per_minute = (current - previous_value) / delta_minutes
+    return rate_per_minute * 30
 
 
 def _spatial_agreement(db, node_id, current_z_scores):
@@ -109,9 +132,55 @@ def _historical_similarity(db, node_id):
     return high_risk_count / len(past)
 
 
-def _infer_hazard(temp_z, humidity_z, distance_z, latest):
-    """Best-guess hazard label from which signal is dominant. Deliberately
-    coarse — a real classifier would use much more than three numbers."""
+def _camera_signal(db, node_id):
+    """Most recent camera observation for this node, if any and if recent
+    enough to still be relevant. Returns (score 0-1, list of flags that
+    were true) — score is the observation's own confidence if any hazard
+    flag (smoke/water/person/debris) was true, else (0.0, None)."""
+    latest = db.query(database.CameraObservationModel)\
+        .filter(database.CameraObservationModel.node_id == node_id)\
+        .order_by(database.CameraObservationModel.timestamp.desc()).first()
+    if latest is None:
+        return 0.0, None
+    age_seconds = (datetime.datetime.utcnow() - latest.timestamp).total_seconds()
+    if age_seconds > CAMERA_RELEVANCE_S:
+        return 0.0, None
+    flags = [name for name in ("smoke", "water", "person", "debris") if getattr(latest, name)]
+    if not flags:
+        return 0.0, None
+    return latest.confidence, flags
+
+
+def _device_reliability(latest_reading):
+    """Fraction (0-1) of the device-condition checks reporting healthy.
+    Fields the sender never included (None) are excluded rather than
+    counted as failures — a simulated node that doesn't report ir_beam_status
+    at all shouldn't be penalized for a field it was never asked to send."""
+    fields = [
+        (latest_reading.esp32_online, True),
+        (latest_reading.dht11_status, "OK"),
+        (latest_reading.hcsr04_status, "OK"),
+        (latest_reading.ir_beam_status, "OK"),
+        (latest_reading.network_status, "CONNECTED"),
+    ]
+    known = [(actual, expected) for actual, expected in fields if actual is not None]
+    if not known:
+        return 1.0  # nothing reported — assume reliable rather than penalize confidence for it
+    return sum(1 for actual, expected in known if actual == expected) / len(known)
+
+
+def _infer_hazard(temp_z, humidity_z, distance_z, latest, camera_flags):
+    """Best-guess hazard label. Camera evidence (direct visual confirmation)
+    takes priority over the anomaly-based guess when available."""
+    if camera_flags:
+        if "smoke" in camera_flags:
+            return "fire"
+        if "water" in camera_flags:
+            return "flood_or_obstruction"
+        if "debris" in camera_flags:
+            return "structural_damage"
+        if "person" in camera_flags:
+            return "person_detected"
     if abs(distance_z) >= max(abs(temp_z), abs(humidity_z)) and latest.distance is not None and distance_z < -1:
         return "flood_or_obstruction"
     if temp_z > 1 and humidity_z < -0.5:
@@ -121,7 +190,19 @@ def _infer_hazard(temp_z, humidity_z, distance_z, latest):
     return "environmental_anomaly"
 
 
-def _build_explanation(readings_context, rate_score, spatial, historical):
+def _profile_for_hazard(hazard):
+    """Maps the inferred hazard to a disaster profile — a different weight
+    distribution per argus_config.json's disaster_profiles (e.g. flood
+    conditions should weight the distance sensor much more heavily than a
+    fire would). Falls back to "general" for anything not confidently
+    categorized as a specific disaster type."""
+    return {
+        "flood_or_obstruction": "flood",
+        "fire": "heat",
+    }.get(hazard, "general")
+
+
+def _build_explanation(readings_context, rate_score, spatial, historical, camera_flags, real_rates):
     """Real, data-driven bullet points — describes actual values against
     baseline (not raw z-scores, which can blow up to nonsensical numbers
     when a sensor's recent readings have near-zero variance) and only
@@ -132,13 +213,20 @@ def _build_explanation(readings_context, rate_score, spatial, historical):
             continue
         baseline = sum(history) / len(history)
         direction = "above" if current > baseline else "below"
-        lines.append(f"{name} is {current:.1f}{unit}, {direction} its recent baseline of {baseline:.1f}{unit}.")
+        line = f"{name} is {current:.1f}{unit}, {direction} its recent baseline of {baseline:.1f}{unit}."
+        rate = real_rates.get(name)
+        if rate is not None and abs(rate) >= 0.5:
+            sign = "+" if rate > 0 else ""
+            line += f" ({sign}{rate:.1f}{unit} / 30 min)"
+        lines.append(line)
     if rate_score >= 0.5:
         lines.append("Conditions are changing rapidly compared to this node's recent history.")
     if spatial >= 0.5:
         lines.append("Nearby nodes are showing similar deviation.")
     if historical >= 0.3:
         lines.append("Conditions resemble this node's past high-risk observations.")
+    if camera_flags:
+        lines.append(f"Camera observed: {', '.join(camera_flags)}.")
     if not lines:
         lines.append("No individual signal is significantly outside its recent baseline.")
     return " ".join(lines)
@@ -177,11 +265,31 @@ def compute_risk_assessment(db, node_id, latest_reading):
         _rate_of_change_score(latest_reading.humidity, previous.humidity if previous else None, humidity_history),
         _rate_of_change_score(latest_reading.distance, previous.distance if previous else None, distance_history),
     )
+    # For the real-units rate display, compare against the OLDEST reading in
+    # the current window rather than just the immediately-previous one — at
+    # a ~2s polling interval, two consecutive readings are almost always
+    # under the 6s minimum delta in _real_rate_per_30min, so the display
+    # would essentially never show up if compared to the immediate predecessor.
+    oldest_in_window = history[-1] if history else None
+    real_rates = {
+        "Temperature": _real_rate_per_30min(latest_reading.temperature, oldest_in_window.temperature if oldest_in_window else None, latest_reading.timestamp, oldest_in_window.timestamp if oldest_in_window else None),
+        "Humidity": _real_rate_per_30min(latest_reading.humidity, oldest_in_window.humidity if oldest_in_window else None, latest_reading.timestamp, oldest_in_window.timestamp if oldest_in_window else None),
+        "Distance": _real_rate_per_30min(latest_reading.distance, oldest_in_window.distance if oldest_in_window else None, latest_reading.timestamp, oldest_in_window.timestamp if oldest_in_window else None),
+    }
 
     spatial = _spatial_agreement(db, node_id, {"temperature": temp_z, "humidity": humidity_z, "distance": distance_z})
     historical = _historical_similarity(db, node_id)
+    camera_score, camera_flags = _camera_signal(db, node_id)
+    device_reliability = _device_reliability(latest_reading)
 
-    weights = CONFIG["risk_weights"]
+    hazard = _infer_hazard(temp_z, humidity_z, distance_z, latest_reading, camera_flags)
+    profile_name = _profile_for_hazard(hazard)
+    weights = CONFIG["disaster_profiles"][profile_name]
+
+    # camera_weight is separate/additive rather than a slice of the profile's
+    # 100% — the spec notes camera evidence "can initially be zero/omitted"
+    # for teams without one, so it's treated as bonus evidence on top of the
+    # core profile rather than something that shrinks the other weights.
     combined = (
         weights["temperature"] * _squash(temp_z)
         + weights["humidity"] * _squash(humidity_z)
@@ -189,11 +297,21 @@ def compute_risk_assessment(db, node_id, latest_reading):
         + weights["rate_of_change"] * rate_score
         + weights["spatial"] * spatial
         + weights["historical"] * historical
+        + CONFIG.get("camera_weight", 0) * camera_score
     )
-    risk_score = round(combined * 100, 1)
+    risk_score = round(min(combined * 100, 100), 1)
     risk_level = _bucket_risk_level(risk_score)
 
-    confidence = round(min(len(history) / BASELINE_WINDOW, 1.0) * 100, 1)
+    # Device reliability feeds CONFIDENCE, not risk_score. The spec's own
+    # illustrative formula lists reliability alongside the other additive
+    # risk terms, but taken literally that means a perfectly healthy device
+    # (reliability=1.0) adds a flat risk floor even with zero anomalies —
+    # a working sensor reporting normal readings shouldn't itself register
+    # as "risky". The more defensible read is that reliability affects how
+    # much to TRUST the assessment: a degraded sensor means less certainty
+    # in whatever risk_score comes out, high or low.
+    history_completeness = min(len(history) / BASELINE_WINDOW, 1.0)
+    confidence = round((history_completeness * 0.6 + device_reliability * 0.4) * 100, 1)
 
     last_assessment = db.query(database.RiskAssessmentModel)\
         .filter(database.RiskAssessmentModel.node_id == node_id)\
@@ -209,18 +327,19 @@ def compute_risk_assessment(db, node_id, latest_reading):
     assessment = database.RiskAssessmentModel(
         node_id=node_id,
         region=node_id,  # no separate region concept yet — one node, one region
-        hazard=_infer_hazard(temp_z, humidity_z, distance_z, latest_reading),
+        hazard=hazard,
         risk_score=risk_score,
         risk_level=risk_level,
         confidence=confidence,
         trend=trend,
+        disaster_profile=profile_name,
         explanation=_build_explanation(
             [
                 ("Temperature", "°C", latest_reading.temperature, temp_history, temp_z),
                 ("Humidity", "%", latest_reading.humidity, humidity_history, humidity_z),
                 ("Distance", "cm", latest_reading.distance, distance_history, distance_z),
             ],
-            rate_score, spatial, historical,
+            rate_score, spatial, historical, camera_flags, real_rates,
         ),
         recommendation=_recommendation_for(risk_level),
     )
