@@ -10,7 +10,7 @@ export function Header({ status }) {
   return (
     <header className="header">
       <div>
-        <h1>Rubble Rover</h1>
+        <h1>ARGUS</h1>
         <p className="subtitle">Ops dashboard</p>
       </div>
       <div className={`status-badge status-${status}`}>

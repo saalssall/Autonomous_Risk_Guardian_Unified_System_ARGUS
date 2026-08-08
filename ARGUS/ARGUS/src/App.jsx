@@ -5,6 +5,9 @@ import { CameraFeed } from "./components/CameraFeed";
 import { DetectionLog } from "./components/DetectionLog";
 import { SensorPanel } from "./components/SensorPanel";
 import { useWebSocket } from "./hooks/useWebSocket";
+import { useRiskAssessment } from "./lib/useRiskAssessment";
+import { RiskPanel } from "./components/RiskPanel"; 
+import { EvidencePanel } from "./components/EvidencePanel";
 import "./App.css";
 
 // Camera feed and detections currently come from separate sources (an MJPEG
@@ -17,6 +20,7 @@ function streamUrlFor(status, roverUrl) {
 
 export default function App() {
   const { status, detections, sensorReadings, connect } = useWebSocket();
+  const risk = useRiskAssessment(sensorReadings);
   const [roverUrl, setRoverUrl] = useState("");
 
   function handleConnect(url) {
@@ -31,6 +35,8 @@ export default function App() {
         <ConnectionPanel status={status} onConnect={handleConnect} />
         <CameraFeed streamUrl={streamUrlFor(status, roverUrl)} />
         <SensorPanel readings={sensorReadings} />
+        <RiskPanel risk={risk} /> 
+        <EvidencePanel risk={risk} />
         <DetectionLog detections={detections} />
       </main>
     </div>

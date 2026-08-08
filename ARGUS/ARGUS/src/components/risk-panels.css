@@ -1,0 +1,254 @@
+/*
+  ARGUS risk panel styles
+  ------------------------
+  Design direction: this is a live instrument panel for people making real
+  evacuation/response calls, not a marketing surface — legibility and instant
+  risk-tier recognition beat personality. The monospace-heavy, hairline-rule
+  language here is lifted directly from the team's own ASCII wireframes
+  (the blueprint's box-drawing mockups), so the shipped UI reads as the same
+  artifact as the plan, not a generic dark dashboard template.
+
+  The five risk-tier colors ARE the signature element — everything else stays
+  quiet so that color always means the same thing everywhere it appears
+  (badge, table rows, map pins once built, resident banner).
+*/
+
+:root {
+  --bg-void: #0a0d12;
+  --bg-panel: #12161d;
+  --bg-panel-raised: #171c25;
+  --border-hair: #232a35;
+  --text-primary: #e7ecf2;
+  --text-muted: #8892a0;
+  --text-faint: #4b5563;
+
+  --risk-low: #35b26c;
+  --risk-guarded: #4c9aff;
+  --risk-elevated: #d9a441;
+  --risk-high: #e8793a;
+  --risk-critical: #e6484a;
+
+  --font-data: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --font-ui: "Inter", ui-sans-serif, system-ui, -apple-system, sans-serif;
+}
+
+.panel {
+  background: var(--bg-panel);
+  border: 1px solid var(--border-hair);
+  border-radius: 3px;
+  padding: 1.25rem 1.5rem;
+  font-family: var(--font-ui);
+  color: var(--text-primary);
+}
+
+.panel h2 {
+  font-family: var(--font-data);
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin: 0 0 1rem 0;
+}
+
+.empty-state {
+  font-size: 0.875rem;
+  color: var(--text-faint);
+}
+
+/* ---------- Risk panel ---------- */
+
+.risk-panel__header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.risk-panel__timestamp {
+  font-family: var(--font-data);
+  font-size: 0.75rem;
+  color: var(--text-faint);
+}
+
+.risk-badge {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.6rem 0.9rem;
+  margin-bottom: 0.75rem;
+  background: var(--bg-panel-raised);
+  border-left: 3px solid var(--risk-color, var(--text-faint));
+  border-radius: 2px;
+}
+
+.risk-badge__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--risk-color, var(--text-faint));
+  box-shadow: 0 0 8px var(--risk-color, transparent);
+  flex-shrink: 0;
+}
+
+.risk-badge__level {
+  font-family: var(--font-data);
+  font-size: 1.1rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--risk-color, var(--text-primary));
+}
+
+.risk-badge__confidence {
+  margin-left: auto;
+  font-family: var(--font-data);
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.risk-panel__hazard {
+  font-size: 0.95rem;
+  font-weight: 500;
+  color: var(--text-primary);
+  margin: 0 0 1rem 0;
+}
+
+.trend-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8rem;
+  margin-bottom: 1rem;
+}
+
+.trend-table th,
+.trend-table td {
+  text-align: left;
+  padding: 0.4rem 0.5rem;
+  border-bottom: 1px solid var(--border-hair);
+}
+
+.trend-table thead th {
+  font-family: var(--font-data);
+  font-size: 0.65rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  font-weight: 500;
+  border-bottom: 1px solid var(--border-hair);
+}
+
+.trend-table tbody th {
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.trend-table td {
+  font-family: var(--font-data);
+  color: var(--text-muted);
+}
+
+.trend-direction--increasing { color: var(--risk-elevated); }
+.trend-direction--decreasing { color: var(--risk-guarded); }
+.trend-direction--stable { color: var(--text-faint); }
+
+.projection-row {
+  border-top: 1px solid var(--border-hair);
+  padding-top: 0.85rem;
+}
+
+.projection-row__label {
+  display: block;
+  font-family: var(--font-data);
+  font-size: 0.65rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  margin-bottom: 0.5rem;
+}
+
+.projection-row__steps {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.projection-step {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 0.5rem 0.4rem;
+  background: var(--bg-panel-raised);
+  border-radius: 2px;
+  text-align: center;
+}
+
+.projection-step span {
+  font-family: var(--font-data);
+  font-size: 0.65rem;
+  color: var(--text-faint);
+}
+
+.projection-step strong {
+  font-family: var(--font-data);
+  font-size: 1rem;
+  color: var(--text-primary);
+}
+
+.projection-row__note {
+  font-size: 0.7rem;
+  color: var(--text-faint);
+  font-style: italic;
+  margin: 0.6rem 0 0 0;
+}
+
+/* ---------- Evidence panel ---------- */
+
+.evidence-panel__explanation {
+  font-size: 0.9rem;
+  line-height: 1.5;
+  color: var(--text-primary);
+  margin: 0 0 1rem 0;
+}
+
+.evidence-checklist {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.evidence-checklist__item {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  font-size: 0.85rem;
+}
+
+.evidence-checklist__item--met {
+  color: var(--text-primary);
+}
+
+.evidence-checklist__item--unmet {
+  color: var(--text-faint);
+}
+
+.evidence-checklist__mark {
+  font-family: var(--font-data);
+  width: 1.2rem;
+  text-align: center;
+}
+
+.evidence-checklist__item--met .evidence-checklist__mark {
+  color: var(--risk-low);
+}
+
+.evidence-panel__caveat {
+  margin: 1rem 0 0 0;
+  padding: 0.6rem 0.8rem;
+  background: var(--bg-panel-raised);
+  border-left: 3px solid var(--risk-elevated);
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  border-radius: 2px;
+}
