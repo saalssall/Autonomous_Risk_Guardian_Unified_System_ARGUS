@@ -1,4 +1,5 @@
 from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
 import shutil
@@ -7,6 +8,18 @@ import datetime
 import database
 
 app = FastAPI(title="Argus Disaster Recovery API", version="1.0")
+
+# ADDED: the dashboard runs on a different origin (e.g. localhost:5173) than
+# this backend (localhost:8000) — without CORS middleware, the browser
+# silently blocks every fetch() call from it, which shows up as "Backend
+# unreachable" even though the backend is running fine. allow_origins=["*"]
+# is fine for a local demo; tighten it if this ever runs somewhere less trusted.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # Ensure upload directory exists for camera images
 UPLOAD_DIR = "uploads"
