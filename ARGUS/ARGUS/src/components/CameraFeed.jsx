@@ -1,25 +1,48 @@
 import { useState } from "react";
 
-export function CameraFeed({ streamUrl }) {
+function authenticatedStreamUrl(streamUrl) {
+  const token = sessionStorage.getItem("argusAccessToken");
+
+  if (!streamUrl || !token) return null;
+
+  const url = new URL(streamUrl);
+  url.searchParams.set("token", token);
+  return url.toString();
+}
+
+export function CameraFeed({ streamUrl, detection }) {
   const [errored, setErrored] = useState(false);
+  const securedUrl = authenticatedStreamUrl(streamUrl);
 
   return (
-    <div className="panel camera-panel">
-      <h2>Camera feed</h2>
+    <section className="camera-panel panel">
+      <p className="eyebrow">Latest visual feed</p>
+
       <div className="camera-frame">
-        {!streamUrl ? (
-          <p className="empty-state">Waiting for a feed URL — set the rover address to begin.</p>
-        ) : errored ? (
-          <p className="empty-state">Feed unavailable. Check the rover is streaming.</p>
-        ) : (
+        {securedUrl && !errored ? (
           <img
-            src={streamUrl}
-            alt="Live rover camera feed"
+            src={securedUrl}
+            alt="Live ARGUS camera feed"
             onError={() => setErrored(true)}
-            onLoad={() => setErrored(false)}
           />
+        ) : (
+          <div className="feed-placeholder">
+            <span>◉</span>
+            <p>Awaiting authenticated node camera feed</p>
+          </div>
         )}
       </div>
-    </div>
+
+      <div className="feed-meta">
+        <span>Captured: {securedUrl ? "live" : "—"}</span>
+        <strong>
+          {detection
+            ? `${detection.label ?? "Environmental observation"} · ${Math.round(
+                (detection.confidence ?? 0) * 100
+              )}%`
+            : "Visual classification pending"}
+        </strong>
+      </div>
+    </section>
   );
 }

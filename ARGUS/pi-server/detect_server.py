@@ -1,31 +1,13 @@
+"""Authenticated ARGUS camera, detection, and sensor relay server.
+
+Set ARGUS_ACCESS_TOKEN before starting. Never expose this service directly to
+the internet: place it behind a TLS reverse proxy for production (wss/https).
 """
-ARGUS Pi server
-----------------
-Runs on the Raspberry Pi (or a dev laptop, for testing). Does three jobs:
-
-  1. Captures camera frames and serves them as an MJPEG stream over HTTP,
-     so the dashboard's CameraFeed component has a real feed to show —
-     not just a WebSocket detection log with an empty video box.
-  2. Runs YOLOv8n person-detection on a sampled subset of frames and
-     broadcasts detections over WebSocket.
-  3. Relays whatever the ESP32 sends (sensor JSON) straight through to
-     any connected dashboard, unchanged.
-
-Why this looks different from the first version: camera capture and YOLO
-inference are both blocking, CPU-bound calls. Calling them directly inside
-an asyncio coroutine freezes the ENTIRE event loop for the duration of each
-call — including the WebSocket server, so sensor readings from the ESP32
-would queue up and arrive in laggy bursts instead of streaming smoothly.
-Both are now offloaded to a small thread pool so the event loop stays
-responsive no matter how long inference takes.
-
-Install: pip install ultralytics opencv-python websockets aiohttp
-Run:     python3 detect_server.py
-"""
-
 import asyncio
+import hmac
 import json
 import logging
+import os
 import time
 from concurrent.futures import ThreadPoolExecutor
 
@@ -37,166 +19,169 @@ from ultralytics import YOLO
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("argus")
 
-# ---- Config — tune these once you know your target hardware's real performance ----
-CAMERA_INDEX = 0
-WEBSOCKET_PORT = 8765
-HTTP_PORT = 8080
+CAMERA_INDEX = int(os.getenv("CAMERA_INDEX", "0"))
+WEBSOCKET_PORT = int(os.getenv("WEBSOCKET_PORT", "8765"))
+HTTP_PORT = int(os.getenv("HTTP_PORT", "8080"))
+DASHBOARD_TOKEN = os.getenv("ARGUS_DASHBOARD_TOKEN", "")
+SENSOR_TOKEN = os.getenv("ARGUS_SENSOR_TOKEN", "")
+ALLOWED_ORIGINS = {origin.strip() for origin in os.getenv("ARGUS_ALLOWED_ORIGINS", "").split(",") if origin.strip()}
 CONFIDENCE_THRESHOLD = 0.5
-DETECT_EVERY_N_FRAMES = 5       # run YOLO on every Nth captured frame — keeps a Pi's CPU from choking
-JPEG_QUALITY = 70                # 0-100, for the MJPEG stream; lower = faster/smaller, blurrier
-STREAM_FPS_CAP = 15              # MJPEG output rate, independent of camera capture rate
-CAMERA_RETRY_DELAY_S = 2
+MAX_MESSAGE_BYTES = 8192
+MAX_STREAM_CLIENTS = 4
 
-# Two workers: one for camera reads, one for YOLO inference, so they can
-# overlap rather than fully serialize on a single thread.
-executor = ThreadPoolExecutor(max_workers=2)
-model = YOLO("yolov8n.pt")  # pretrained on COCO — downloads automatically on first run
+if min(len(DASHBOARD_TOKEN), len(SENSOR_TOKEN)) < 24:
+    raise RuntimeError("Set unique ARGUS_DASHBOARD_TOKEN and ARGUS_SENSOR_TOKEN values of at least 24 characters.")
 
-connected_ws_clients = set()
-latest_jpeg_frame = None  # shared between capture_loop() and the HTTP stream handler
+executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="argus")
+model = YOLO("yolov8n.pt")
+clients = set()
+latest_jpeg_frame = None
 frame_lock = asyncio.Lock()
+stream_slots = asyncio.Semaphore(MAX_STREAM_CLIENTS)
 
 
-# ---------- WebSocket: relay ESP32 sensor data + broadcast detections ----------
+def token_is_valid(value, expected):
+    return isinstance(value, str) and hmac.compare_digest(value, expected)
 
-async def handle_ws_client(websocket):
-    connected_ws_clients.add(websocket)
-    log.info("Client connected (%d total)", len(connected_ws_clients))
+
+def valid_sensor(data):
+    """Allow only bounded, expected sensor records to be relayed."""
+    if not isinstance(data, dict) or data.get("type") != "sensor":
+        return False
+    node_id = data.get("node_id")
+    if not isinstance(node_id, str) or not 1 <= len(node_id) <= 64:
+        return False
+    for field in ("temperature", "humidity", "distance_cm", "sound_level", "battery"):
+        if field in data and (not isinstance(data[field], (int, float)) or not -10000 <= data[field] <= 100000):
+            return False
+    return True
+
+
+async def authenticate(websocket):
     try:
-        async for message in websocket:
-            # Anything a client sends (the ESP32's sensor JSON) gets relayed
-            # straight through to everyone else (the dashboard). No parsing
-            # or validation here on purpose — keeps this server a dumb pipe
-            # that can't itself corrupt the payload.
-            await broadcast(message, exclude=websocket)
-    except websockets.ConnectionClosed:
-        pass  # normal on disconnect — nothing to log as an error
-    finally:
-        connected_ws_clients.discard(websocket)
-        log.info("Client disconnected (%d total)", len(connected_ws_clients))
+        raw = await asyncio.wait_for(websocket.recv(), timeout=5)
+        if not isinstance(raw, str) or len(raw.encode()) > MAX_MESSAGE_BYTES:
+            return False
+        message = json.loads(raw)
+        if not isinstance(message, dict) or message.get("type") != "auth":
+            return None
+        if message.get("role") == "dashboard" and token_is_valid(message.get("token"), DASHBOARD_TOKEN):
+            return "dashboard"
+        if message.get("role") == "sensor" and token_is_valid(message.get("token"), SENSOR_TOKEN):
+            return "sensor"
+        return None
+    except (asyncio.TimeoutError, json.JSONDecodeError, websockets.ConnectionClosed):
+        return False
 
 
 async def broadcast(message, exclude=None):
-    if not connected_ws_clients:
-        return
-    payload = message if isinstance(message, str) else json.dumps(message)
-    targets = [c for c in connected_ws_clients if c is not exclude]
-    if not targets:
-        return
-    results = await asyncio.gather(
-        *(client.send(payload) for client in targets),
-        return_exceptions=True,  # one dropped client shouldn't crash the broadcast
-    )
+    payload = json.dumps(message, separators=(",", ":"))
+    targets = [client for client in clients if client is not exclude]
+    results = await asyncio.gather(*(client.send(payload) for client in targets), return_exceptions=True)
     for client, result in zip(targets, results):
         if isinstance(result, Exception):
-            log.warning("Failed to send to a client: %s", result)
+            clients.discard(client)
 
 
-# ---------- Camera capture + inference — all blocking work stays off the event loop ----------
+async def handle_ws_client(websocket):
+    role = await authenticate(websocket)
+    if not role:
+        await websocket.close(code=1008, reason="Authentication required")
+        return
+    if role == "dashboard":
+        clients.add(websocket)
+    await websocket.send(json.dumps({"type": "auth_ok", "role": role}))
+    log.info("Authenticated %s connected (%d dashboard clients)", role, len(clients))
+    try:
+        async for raw in websocket:
+            if not isinstance(raw, str) or len(raw.encode()) > MAX_MESSAGE_BYTES:
+                await websocket.close(code=1009, reason="Message too large")
+                return
+            try:
+                data = json.loads(raw)
+            except json.JSONDecodeError:
+                continue
+            if role == "sensor" and valid_sensor(data):
+                await broadcast(data, exclude=websocket)
+    finally:
+        clients.discard(websocket)
+
 
 def open_camera():
-    """Blocking — always call via executor."""
     cap = cv2.VideoCapture(CAMERA_INDEX)
     return cap if cap.isOpened() else None
 
 
-def run_inference(frame):
-    """Blocking — always call via executor."""
-    return model(frame, verbose=False)[0]
-
-
 def encode_jpeg(frame):
-    """Blocking — always call via executor."""
-    ok, buffer = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, JPEG_QUALITY])
+    ok, buffer = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
     return buffer.tobytes() if ok else None
+
+
+def run_inference(frame):
+    return model(frame, verbose=False)[0]
 
 
 async def capture_loop():
     global latest_jpeg_frame
     loop = asyncio.get_running_loop()
-
-    cap = await loop.run_in_executor(executor, open_camera)
-    while cap is None:
-        log.error(
-            "Camera not available at index %d — retrying in %ds. "
-            "If this is a Pi Camera Module (CSI ribbon), cv2.VideoCapture may need "
-            "a libcamera/GStreamer pipeline instead of a bare index.",
-            CAMERA_INDEX, CAMERA_RETRY_DELAY_S,
-        )
-        await asyncio.sleep(CAMERA_RETRY_DELAY_S)
-        cap = await loop.run_in_executor(executor, open_camera)
-    log.info("Camera opened (index %d)", CAMERA_INDEX)
-
+    cap = None
     frame_count = 0
-    consecutive_failures = 0
-
     while True:
+        if cap is None:
+            cap = await loop.run_in_executor(executor, open_camera)
+            if cap is None:
+                log.warning("Camera unavailable; retrying in 2 seconds")
+                await asyncio.sleep(2)
+                continue
         ok, frame = await loop.run_in_executor(executor, cap.read)
         if not ok:
-            consecutive_failures += 1
-            if consecutive_failures % 20 == 1:  # don't spam the log every 100ms
-                log.warning("Camera read failed (%d consecutive)", consecutive_failures)
-            await asyncio.sleep(0.1)
+            cap.release()
+            cap = None
             continue
-        consecutive_failures = 0
-
-        frame_count += 1
-
-        jpeg_bytes = await loop.run_in_executor(executor, encode_jpeg, frame)
-        if jpeg_bytes is not None:
+        jpeg = await loop.run_in_executor(executor, encode_jpeg, frame)
+        if jpeg:
             async with frame_lock:
-                latest_jpeg_frame = jpeg_bytes
-
-        if frame_count % DETECT_EVERY_N_FRAMES == 0:
+                latest_jpeg_frame = jpeg
+        frame_count += 1
+        if frame_count % 5 == 0:
             results = await loop.run_in_executor(executor, run_inference, frame)
             for box in results.boxes:
-                label = model.names[int(box.cls)]
-                confidence = float(box.conf)
-                if label == "person" and confidence >= CONFIDENCE_THRESHOLD:
-                    await broadcast({
-                        "type": "detection",
-                        "label": label,
-                        "confidence": confidence,
-                        "timestamp": time.time() * 1000,  # ms — matches JS `new Date()`
-                    })
+                if model.names[int(box.cls)] == "person" and float(box.conf) >= CONFIDENCE_THRESHOLD:
+                    await broadcast({"type": "detection", "label": "person", "confidence": float(box.conf), "timestamp": int(time.time() * 1000)})
+        await asyncio.sleep(0)
 
-        await asyncio.sleep(0)  # yield control back to the event loop between frames
-
-
-# ---------- HTTP: MJPEG stream for the dashboard's CameraFeed component ----------
 
 async def mjpeg_stream_handler(request):
-    response = web.StreamResponse(
-        status=200,
-        headers={"Content-Type": "multipart/x-mixed-replace; boundary=frame"},
-    )
-    await response.prepare(request)
-    try:
-        while True:
-            async with frame_lock:
-                frame = latest_jpeg_frame
-            if frame is not None:
-                await response.write(b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + frame + b"\r\n")
-            await asyncio.sleep(1 / STREAM_FPS_CAP)
-    except (ConnectionResetError, asyncio.CancelledError):
-        pass  # client closed the <img> tag / navigated away — not an error
-    return response
+    if not token_is_valid(request.query.get("token"), DASHBOARD_TOKEN):
+        raise web.HTTPUnauthorized(text="Authentication required")
+    if stream_slots.locked() and getattr(stream_slots, "_value", 0) <= 0:
+        raise web.HTTPServiceUnavailable(text="Stream capacity reached")
+    async with stream_slots:
+        response = web.StreamResponse(status=200, headers={"Content-Type": "multipart/x-mixed-replace; boundary=frame", "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"})
+        await response.prepare(request)
+        try:
+            while True:
+                async with frame_lock:
+                    frame = latest_jpeg_frame
+                if frame:
+                    await response.write(b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + frame + b"\r\n")
+                await asyncio.sleep(1 / 15)
+        except (ConnectionResetError, asyncio.CancelledError):
+            pass
+        return response
 
 
-async def start_http_server():
+async def main():
     app = web.Application()
     app.router.add_get("/stream", mjpeg_stream_handler)
     runner = web.AppRunner(app)
     await runner.setup()
-    site = web.TCPSite(runner, "0.0.0.0", HTTP_PORT)
-    await site.start()
-    log.info("MJPEG stream serving at http://0.0.0.0:%d/stream", HTTP_PORT)
-
-
-async def main():
-    await start_http_server()
-    async with websockets.serve(handle_ws_client, "0.0.0.0", WEBSOCKET_PORT):
-        log.info("WebSocket server listening at ws://0.0.0.0:%d", WEBSOCKET_PORT)
+    await web.TCPSite(runner, "0.0.0.0", HTTP_PORT).start()
+    log.info("Authenticated MJPEG service listening on port %d", HTTP_PORT)
+    # ESP32 clients do not normally send an Origin header; they still must authenticate.
+    origin_policy = (ALLOWED_ORIGINS | {None}) if ALLOWED_ORIGINS else None
+    async with websockets.serve(handle_ws_client, "0.0.0.0", WEBSOCKET_PORT, origins=origin_policy, max_size=MAX_MESSAGE_BYTES, compression=None):
+        log.info("Authenticated WebSocket service listening on port %d", WEBSOCKET_PORT)
         await capture_loop()
 
 
