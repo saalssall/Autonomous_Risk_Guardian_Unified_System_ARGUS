@@ -26,6 +26,7 @@ DASHBOARD_TOKEN = os.getenv("ARGUS_DASHBOARD_TOKEN", "")
 SENSOR_TOKEN = os.getenv("ARGUS_SENSOR_TOKEN", "")
 ALLOWED_ORIGINS = {origin.strip() for origin in os.getenv("ARGUS_ALLOWED_ORIGINS", "").split(",") if origin.strip()}
 CONFIDENCE_THRESHOLD = 0.5
+SCENE_CHANGE_THRESHOLD = float(os.getenv("SCENE_CHANGE_THRESHOLD", "0.12"))
 MAX_MESSAGE_BYTES = 8192
 MAX_STREAM_CLIENTS = 4
 
@@ -38,6 +39,7 @@ clients = set()
 latest_jpeg_frame = None
 frame_lock = asyncio.Lock()
 stream_slots = asyncio.Semaphore(MAX_STREAM_CLIENTS)
+scene_baseline = None
 
 
 def token_is_valid(value, expected):
@@ -117,8 +119,29 @@ def encode_jpeg(frame):
     return buffer.tobytes() if ok else None
 
 
-def run_inference(frame):
-    return model(frame, verbose=False)[0]
+def analyse_visual_frame(frame):
+    """Run supported visual signals in a worker thread.
+
+    YOLO supplies person count. Scene change is a deliberately simple frame
+    comparison against a slowly adapting baseline; it is an observation, not
+    a hazard classifier.
+    """
+    global scene_baseline
+    results = model(frame, verbose=False)[0]
+    people = []
+    for box in results.boxes:
+        if model.names[int(box.cls)] == "person" and float(box.conf) >= CONFIDENCE_THRESHOLD:
+            people.append(float(box.conf))
+
+    gray = cv2.cvtColor(cv2.resize(frame, (160, 90)), cv2.COLOR_BGR2GRAY).astype("float32")
+    if scene_baseline is None:
+        scene_baseline = gray
+        change_score = 0.0
+    else:
+        change_score = min(1.0, float(cv2.absdiff(gray, scene_baseline).mean() / 255.0))
+        # Adapt slowly so persistent lighting changes do not remain alerts forever.
+        cv2.accumulateWeighted(gray, scene_baseline, 0.03)
+    return people, change_score
 
 
 async def capture_loop():
@@ -144,10 +167,18 @@ async def capture_loop():
                 latest_jpeg_frame = jpeg
         frame_count += 1
         if frame_count % 5 == 0:
-            results = await loop.run_in_executor(executor, run_inference, frame)
-            for box in results.boxes:
-                if model.names[int(box.cls)] == "person" and float(box.conf) >= CONFIDENCE_THRESHOLD:
-                    await broadcast({"type": "detection", "label": "person", "confidence": float(box.conf), "timestamp": int(time.time() * 1000)})
+            people, change_score = await loop.run_in_executor(executor, analyse_visual_frame, frame)
+            timestamp = int(time.time() * 1000)
+            await broadcast({
+                "type": "visual_observation",
+                "people_count": len(people),
+                "scene_change": round(change_score, 3),
+                "timestamp": timestamp,
+            })
+            for confidence in people:
+                await broadcast({"type": "detection", "label": "person", "confidence": confidence, "timestamp": timestamp})
+            if change_score >= SCENE_CHANGE_THRESHOLD:
+                await broadcast({"type": "detection", "label": "scene_change", "confidence": change_score, "timestamp": timestamp})
         await asyncio.sleep(0)
 
 
