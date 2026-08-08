@@ -1,0 +1,27 @@
+{
+  "risk_levels": {
+    "LOW": [0, 19],
+    "GUARDED": [20, 39],
+    "ELEVATED": [40, 59],
+    "HIGH": [60, 79],
+    "CRITICAL": [80, 100]
+  },
+  "risk_weights": {
+    "temperature": 0.25,
+    "humidity": 0.15,
+    "distance": 0.25,
+    "rate_of_change": 0.15,
+    "spatial": 0.10,
+    "historical": 0.10
+  },
+  "health_levels": {
+    "HEALTHY": [90, 100],
+    "DEGRADED": [70, 89],
+    "COMPROMISED": [40, 69],
+    "OFFLINE": [0, 39]
+  },
+  "trend_thresholds": {
+    "increasing": 0.10,
+    "decreasing": -0.10
+  }
+}
