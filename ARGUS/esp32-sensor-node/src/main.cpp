@@ -2,41 +2,50 @@
   Sensor node — ESP32
 
   Reads DHT22 (temp/humidity), HC-SR04 (ultrasonic distance), a microphone
-  module (analog sound level), a beam-break sensor (digital), and battery
-  voltage (ADC), then pushes one JSON reading to the Pi's WebSocket server
-  every READ_INTERVAL_MS. The Pi just relays it straight to the dashboard —
-  see detect_server.py.
+  module (analog sound level), and a beam-break sensor (digital), then POSTs
+  one reading to the FastAPI backend's /api/sensor-data every
+  READ_INTERVAL_MS, as application/x-www-form-urlencoded — matching
+  ingest_sensor_data()'s exact Form field names: node_id, temperature,
+  humidity, distance, sound, beam_status, latitude, longitude.
+
+  Note: the backend doesn't accept battery or device_health on this endpoint
+  (battery only lives on the Node record, which this doesn't update), and it
+  stamps its own timestamp server-side — so neither is sent here.
 
   Libraries needed (Arduino Library Manager):
     - DHT sensor library (Adafruit) + its Adafruit Unified Sensor dependency
-    - ArduinoJson (Benoit Blanchon)
-    - WebSockets (Markus Sattler — search "arduinoWebSockets")
+  (HTTPClient and WiFi are built into the ESP32 Arduino core — nothing else to install.)
 */
 
 #include <WiFi.h>
-#include <WebSocketsClient.h>
-#include <ArduinoJson.h>
+#include <HTTPClient.h>
 #include <DHT.h>
 
-// ---- Wi-Fi + Pi connection — fill these in ----
+// ---- Wi-Fi + backend connection — fill these in ----
 const char* WIFI_SSID = "your-network";
 const char* WIFI_PASSWORD = "your-password";
-const char* PI_HOST = "raspberrypi.local"; // or the Pi's IP address, e.g. "192.168.1.42"
-const uint16_t PI_PORT = 8765;
+const char* BACKEND_HOST = "raspberrypi.local"; // or the backend's IP address
+const uint16_t BACKEND_PORT = 8000;             // FastAPI/uvicorn default
+
+// ---- Node identity — this node is stationary, so lat/lon are fixed constants ----
+// IMPORTANT: match this to whatever node_id the rest of the team is using —
+// the seed script registers "node-north-01"; change this if that's the one
+// your team is treating as canonical.
+const char* NODE_ID = "ARGUS-01";
+const float NODE_LAT = -27.5000; // set to this node's actual deployment location
+const float NODE_LON = 153.0500;
 
 // ---- Pin assignments — adjust to match your actual wiring ----
 #define DHT_PIN 4
 #define DHT_TYPE DHT22
 #define ULTRASONIC_TRIG_PIN 5
-#define ULTRASONIC_ECHO_PIN 18
-#define MIC_ANALOG_PIN 34   // must be an ADC1 pin (32-39) — ADC2 pins don't work while Wi-Fi is active
-#define BEAM_BREAK_PIN 19   // digital input; assumes the sensor pulls LOW when the beam is broken
-#define BATTERY_ADC_PIN 35  // also ADC1
+#define ULTRASONIC_ECHO_PIN 18   // wire through a voltage divider — HC-SR04 Echo is 5V, ESP32 GPIO is 3.3V only
+#define MIC_ANALOG_PIN 34        // must be an ADC1 pin (32-39) — ADC2 pins don't work while Wi-Fi is active
+#define BEAM_BREAK_PIN 19        // digital input; module outputs LOW=intact/HIGH=broken directly, no pull needed
 
 const unsigned long READ_INTERVAL_MS = 2000; // how often to send a reading
 
 DHT dht(DHT_PIN, DHT_TYPE);
-WebSocketsClient webSocket;
 unsigned long lastReadTime = 0;
 
 float readDistanceCm() {
@@ -51,34 +60,54 @@ float readDistanceCm() {
   return durationUs / 58.0;       // standard speed-of-sound conversion for HC-SR04
 }
 
-float readBatteryVoltage() {
-  // Adjust DIVIDER_RATIO to match whatever voltage-divider circuit you build —
-  // this assumes a 2:1 divider bringing a ~7.4V pack down under the ESP32's 3.3V max.
-  const float DIVIDER_RATIO = 2.0;
-  int raw = analogRead(BATTERY_ADC_PIN);
-  return (raw / 4095.0) * 3.3 * DIVIDER_RATIO;
+String urlEncode(const String& value) {
+  String encoded;
+  char buf[4];
+  for (size_t i = 0; i < value.length(); i++) {
+    char c = value.charAt(i);
+    if (isalnum(c) || c == '-' || c == '_' || c == '.' || c == '~') {
+      encoded += c;
+    } else {
+      snprintf(buf, sizeof(buf), "%%%02X", (unsigned char)c);
+      encoded += buf;
+    }
+  }
+  return encoded;
 }
 
 void sendReading() {
-  StaticJsonDocument<256> doc;
-  doc["type"] = "sensor";
-  doc["temperature"] = dht.readTemperature();
-  doc["humidity"] = dht.readHumidity();
-  doc["distance_cm"] = readDistanceCm();
-  doc["sound_level"] = analogRead(MIC_ANALOG_PIN);
-  doc["beam_broken"] = digitalRead(BEAM_BREAK_PIN) == LOW;
-  doc["battery_v"] = readBatteryVoltage();
-  doc["timestamp"] = (double)millis(); // relative time is fine for a demo; swap for NTP if you need wall-clock time
+  float temperature = dht.readTemperature();
+  float humidity = dht.readHumidity();
+  float distance = readDistanceCm();
+  int soundLevel = analogRead(MIC_ANALOG_PIN);
+  bool beamBroken = digitalRead(BEAM_BREAK_PIN) == HIGH; // confirmed polarity: LOW=intact, HIGH=broken
 
-  String payload;
-  serializeJson(doc, payload);
-  webSocket.sendTXT(payload);
-}
+  if (isnan(temperature) || isnan(humidity)) {
+    Serial.println("DHT22 read failed — skipping this cycle");
+    return;
+  }
 
-void onWebSocketEvent(WStype_t type, uint8_t* payload, size_t length) {
-  // Not reacting to messages from the Pi right now — logging is enough for a demo.
-  if (type == WStype_CONNECTED) Serial.println("WebSocket connected to Pi");
-  if (type == WStype_DISCONNECTED) Serial.println("WebSocket disconnected — will retry automatically");
+  String body = "node_id=" + urlEncode(NODE_ID) +
+                "&temperature=" + String(temperature, 1) +
+                "&humidity=" + String(humidity, 1) +
+                "&distance=" + String(distance, 1) +
+                "&sound=" + String(soundLevel) +
+                "&beam_status=" + urlEncode(beamBroken ? "broken" : "normal") +
+                "&latitude=" + String(NODE_LAT, 6) +
+                "&longitude=" + String(NODE_LON, 6);
+
+  HTTPClient http;
+  String endpoint = String("http://") + BACKEND_HOST + ":" + BACKEND_PORT + "/api/sensor-data";
+  http.begin(endpoint);
+  http.addHeader("Content-Type", "application/x-www-form-urlencoded");
+
+  int statusCode = http.POST(body);
+  if (statusCode > 0) {
+    Serial.printf("POST /api/sensor-data -> %d\n", statusCode);
+  } else {
+    Serial.printf("POST failed: %s\n", http.errorToString(statusCode).c_str());
+  }
+  http.end();
 }
 
 void setup() {
@@ -87,7 +116,7 @@ void setup() {
 
   pinMode(ULTRASONIC_TRIG_PIN, OUTPUT);
   pinMode(ULTRASONIC_ECHO_PIN, INPUT);
-  pinMode(BEAM_BREAK_PIN, INPUT_PULLUP);
+  pinMode(BEAM_BREAK_PIN, INPUT); // module drives this pin directly — no internal pull needed
 
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
   while (WiFi.status() != WL_CONNECTED) {
@@ -95,15 +124,9 @@ void setup() {
     Serial.print(".");
   }
   Serial.println("\nWi-Fi connected");
-
-  webSocket.begin(PI_HOST, PI_PORT, "/");
-  webSocket.onEvent(onWebSocketEvent);
-  webSocket.setReconnectInterval(3000); // auto-retry if the Pi drops or isn't up yet
 }
 
 void loop() {
-  webSocket.loop();
-
   if (millis() - lastReadTime >= READ_INTERVAL_MS) {
     lastReadTime = millis();
     sendReading();
