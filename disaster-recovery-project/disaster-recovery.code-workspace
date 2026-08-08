@@ -1,0 +1,8 @@
+{
+  "folders": [
+    { "name": "dashboard", "path": "dashboard" },
+    { "name": "pi-server", "path": "pi-server" },
+    { "name": "esp32-sensor-node", "path": "esp32-sensor-node" }
+  ],
+  "settings": {}
+}

@@ -1,0 +1,31 @@
+:root {
+  /* palette — dark console, signal-green for "live", amber for alerts */
+  --bg: #0f1417;
+  --panel: #161d22;
+  --panel-border: #263139;
+  --text: #e4e9ec;
+  --text-dim: #7d8a91;
+  --live: #34d399;
+  --live-dim: #1a4d3d;
+  --alert: #f5a623;
+  --alert-dim: #4d3a10;
+  --danger: #f24545;
+
+  --font-ui: "Inter", system-ui, sans-serif;
+  --font-data: "JetBrains Mono", monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-ui);
+}
+
+#root {
+  min-height: 100vh;
+}

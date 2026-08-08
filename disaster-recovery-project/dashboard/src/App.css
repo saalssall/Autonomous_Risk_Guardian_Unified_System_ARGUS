@@ -1,0 +1,240 @@
+.app {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 24px;
+}
+
+/* --- header --- */
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 24px;
+}
+
+.header h1 {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.subtitle {
+  margin: 2px 0 0;
+  color: var(--text-dim);
+  font-size: 13px;
+}
+
+.status-badge {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--panel-border);
+  background: var(--panel);
+  font-family: var(--font-data);
+  font-size: 12px;
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-dim);
+}
+
+.status-open .status-dot {
+  background: var(--live);
+  box-shadow: 0 0 0 3px var(--live-dim);
+  animation: pulse 1.6s ease-in-out infinite;
+}
+
+.status-error .status-dot,
+.status-closed .status-dot {
+  background: var(--danger);
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .status-open .status-dot { animation: none; }
+}
+
+/* --- layout grid --- */
+.grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+.connection-panel {
+  grid-column: 1 / -1;
+}
+
+/* --- shared panel look --- */
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  border-radius: 10px;
+  padding: 16px;
+}
+
+.panel h2 {
+  margin: 0 0 12px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.empty-state {
+  color: var(--text-dim);
+  font-size: 13px;
+  line-height: 1.5;
+  margin: 0;
+}
+
+/* --- connection panel --- */
+.connection-panel label {
+  display: block;
+  font-size: 12px;
+  color: var(--text-dim);
+  margin-bottom: 8px;
+}
+
+.connection-row {
+  display: flex;
+  gap: 8px;
+}
+
+.connection-row input {
+  flex: 1;
+  background: var(--bg);
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  color: var(--text);
+  font-family: var(--font-data);
+  font-size: 13px;
+}
+
+.connection-row input:focus {
+  outline: 2px solid var(--live);
+  outline-offset: 1px;
+}
+
+.connection-row button {
+  background: var(--live);
+  color: #0f1417;
+  border: none;
+  border-radius: 6px;
+  padding: 8px 16px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.connection-row button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* --- camera feed --- */
+.camera-frame {
+  aspect-ratio: 4 / 3;
+  background: var(--bg);
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.camera-frame img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.camera-frame .empty-state {
+  text-align: center;
+  padding: 0 24px;
+}
+
+/* --- detection log --- */
+.log-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.log-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--panel-border);
+  font-family: var(--font-data);
+  font-size: 13px;
+}
+
+.log-item:last-child {
+  border-bottom: none;
+}
+
+.log-label {
+  font-weight: 600;
+  color: var(--alert);
+}
+
+.log-confidence {
+  color: var(--text-dim);
+}
+
+.log-time {
+  color: var(--text-dim);
+}
+
+/* --- sensor panel --- */
+.sensor-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin: 0;
+}
+
+.sensor-field dt {
+  font-size: 11px;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.sensor-field dd {
+  margin: 4px 0 0;
+  font-family: var(--font-data);
+  font-size: 20px;
+  font-weight: 500;
+}
+
+.beam-alert {
+  margin: 16px 0 0;
+  padding: 8px 10px;
+  background: var(--alert-dim);
+  color: var(--alert);
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+@media (max-width: 720px) {
+  .grid {
+    grid-template-columns: 1fr;
+  }
+}
