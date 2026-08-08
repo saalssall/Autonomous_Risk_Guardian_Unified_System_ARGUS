@@ -485,6 +485,49 @@
   color: var(--live);
 }
 
+.ai-llm-section {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px dashed var(--panel-border);
+}
+
+.ai-llm-section button {
+  background: var(--panel);
+  border: 1px solid var(--live);
+  color: var(--live);
+  border-radius: 6px;
+  padding: 6px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.ai-llm-section button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.ai-llm-result {
+  margin-top: 12px;
+}
+
+.ai-llm-result p {
+  font-size: 13px;
+  line-height: 1.6;
+  margin: 6px 0;
+}
+
+.ai-llm-result ul {
+  margin: 8px 0;
+  padding-left: 18px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.ai-llm-action strong {
+  color: var(--alert);
+}
+
 /* --- device health --- */
 .device-health-list {
   list-style: none;

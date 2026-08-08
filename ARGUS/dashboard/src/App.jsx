@@ -30,7 +30,7 @@ export default function App() {
         <NodePanel node={selectedNode} latestRisk={latestRisk} />
         <SensorCards latestReading={latestReading} previousReading={previousReading} />
         <RiskEvolutionChart riskHistory={nodeRiskHistory} />
-        <AIExplanation latestRisk={latestRisk} />
+        <AIExplanation latestRisk={latestRisk} backendUrl={BACKEND_URL} nodeId={selectedNodeId} />
         <DeviceHealthPanel deviceHealth={deviceHealth} hasSelection={!!selectedNode} />
         <CameraObservationPanel observation={latestObservation} backendUrl={BACKEND_URL} />
       </main>
