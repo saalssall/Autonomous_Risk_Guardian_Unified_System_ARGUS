@@ -240,4 +240,14 @@ def ingest_image(
     )
     db.add(observation)
     db.commit()
+
+    # ADDED — recompute risk against this node's latest sensor reading so a
+    # camera detection (e.g. smoke) affects risk immediately, rather than
+    # waiting for the next unrelated sensor-data POST to happen to trigger it.
+    latest_reading = db.query(database.SensorReadingModel)\
+        .filter(database.SensorReadingModel.node_id == node_id)\
+        .order_by(database.SensorReadingModel.timestamp.desc()).first()
+    if latest_reading:
+        risk_engine.compute_risk_assessment(db, node_id, latest_reading)
+
     return {"status": "success", "message": "Camera observation and image logged successfully."}

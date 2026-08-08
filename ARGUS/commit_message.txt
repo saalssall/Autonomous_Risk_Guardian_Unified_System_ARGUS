@@ -1,0 +1,49 @@
+feat(backend): fold camera evidence and device reliability into risk
+
+Applies a more detailed math spec for the risk engine on top of what
+was already built. Confirmed the existing MVP weights (temperature 25%,
+humidity 15%, distance 25%, rate-of-change 15%, spatial 10%,
+historical 10%) were already correct — no change there.
+
+- argus_config.json: restructured risk_weights into disaster_profiles
+  (general/flood/heat, each its own weight distribution) and added a
+  separate camera_weight. Camera stays additive rather than a slice of
+  the profile's 100%, per the spec's note that it "can initially be
+  zero/omitted" for teams without one.
+- database.py: added disaster_profile to RiskAssessmentModel, so each
+  assessment records which weight profile was actually used.
+- risk_engine.py:
+  - _camera_signal() pulls the most recent camera observation (if
+    still recent enough to matter) into the score
+  - _device_reliability() feeds into confidence, not risk_score — a
+    perfectly healthy device with zero anomalies shouldn't itself add
+    a risk floor, which is what treating it as an additive risk term
+    literally would do. Documented the reasoning in code.
+  - _profile_for_hazard() selects flood/heat/general from the inferred
+    hazard, so a flood-shaped anomaly gets weighted differently than a
+    fire-shaped one
+  - _real_rate_per_30min() adds the human-readable rate display
+    ("+6°C / 30 min") the spec asks for
+- main.py: camera uploads now trigger a risk recompute immediately,
+  not just sensor readings — so a smoke detection affects risk right
+  away instead of waiting for the next unrelated sensor POST.
+
+Two bugs caught by testing scenarios end-to-end, not just written and
+trusted:
+- The rate display initially blew up to nonsense (e.g. "+1913968.1°C /
+  30 min") when two readings landed close together in time — same
+  divide-by-near-zero class of issue as an earlier z-score bug. Fixed
+  with a minimum time-delta guard; verified against the spec's own
+  worked example (25°C->31°C over 30 min => exactly +6.0).
+- Comparing against only the immediately-previous reading would never
+  produce a rate at the real ~2s polling interval (always below the
+  minimum delta). Switched to comparing against the oldest reading in
+  the current window instead.
+
+Verified with live scenarios: a simulated fire correctly selected the
+heat profile (risk 75.0, HIGH); a simulated flood correctly selected
+the flood profile (risk 55.0, ELEVATED); a simulated smoke detection
+moved a node from risk 27.2 to 39.3 and flipped its hazard to fire.
+
+Operational note: delete any local argus.db — the new disaster_profile
+column won't appear in an existing file.
