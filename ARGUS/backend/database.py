@@ -30,7 +30,13 @@ class SensorReadingModel(Base):
     sound = Column(Float, nullable=True)         
     beam_status = Column(String, nullable=True)  
     latitude = Column(Float, nullable=True)      
-    longitude = Column(Float, nullable=True)     
+    longitude = Column(Float, nullable=True)
+    # ADDED — device condition, per the "common variables" spec
+    esp32_online = Column(Boolean, nullable=True)
+    dht11_status = Column(String, nullable=True)
+    hcsr04_status = Column(String, nullable=True)
+    ir_beam_status = Column(String, nullable=True)
+    network_status = Column(String, nullable=True)
     node = relationship("NodeModel", back_populates="sensor_readings")
 class CameraObservationModel(Base):
     __tablename__ = "camera_observations"
@@ -48,11 +54,15 @@ class RiskAssessmentModel(Base):
     __tablename__ = "risk_assessments"
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
     timestamp = Column(DateTime, default=datetime.datetime.utcnow, index=True)
+    node_id = Column(String, ForeignKey("nodes.node_id", ondelete="CASCADE"), nullable=True, index=True)  # ADDED — nullable so old seeded rows stay valid
     region = Column(String, nullable=False)
     hazard = Column(String, nullable=False)
+    risk_score = Column(Float, nullable=True)  # ADDED — real 0-100 computed score; risk_level below is just its bucket
     risk_level = Column(String, nullable=False)  # LOW, GUARDED, ELEVATED, HIGH, CRITICAL
     confidence = Column(Float, nullable=False)
+    trend = Column(String, nullable=True)  # ADDED — increasing / decreasing / steady
     explanation = Column(String, nullable=True)  
     recommendation = Column(String, nullable=False)
+    node = relationship("NodeModel")
 def init_db():
     Base.metadata.create_all(bind=engine)

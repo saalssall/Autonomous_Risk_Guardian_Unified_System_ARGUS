@@ -6,11 +6,19 @@
   one reading to the FastAPI backend's /api/sensor-data every
   READ_INTERVAL_MS, as application/x-www-form-urlencoded — matching
   ingest_sensor_data()'s exact Form field names: node_id, temperature,
-  humidity, distance, sound, beam_status, latitude, longitude.
+  humidity, distance, sound, beam_status, latitude, longitude, plus the
+  device-condition fields the shared spec calls for: esp32_online,
+  dht11_status, hcsr04_status, ir_beam_status, network_status.
 
-  Note: the backend doesn't accept battery or device_health on this endpoint
-  (battery only lives on the Node record, which this doesn't update), and it
-  stamps its own timestamp server-side — so neither is sent here.
+  On a sensor read failure, this falls back to the last known-good value
+  for that sensor (rather than skipping the whole cycle, or sending a
+  sentinel like -1) so a single bad read doesn't get treated as a genuine
+  spike by the backend's anomaly detection — while still reporting the
+  real *_status as FAIL so the failure itself isn't hidden.
+
+  Note: the backend doesn't accept battery on this endpoint (it only lives
+  on the Node record, which this doesn't update), and it stamps its own
+  timestamp server-side — so neither is sent here.
 
   Libraries needed (Arduino Library Manager):
     - DHT sensor library (Adafruit) + its Adafruit Unified Sensor dependency
@@ -48,6 +56,13 @@ const unsigned long READ_INTERVAL_MS = 2000; // how often to send a reading
 DHT dht(DHT_PIN, DHT_TYPE);
 unsigned long lastReadTime = 0;
 
+// Last known-good values — used as a fallback when a sensor read fails, so
+// a single bad read doesn't register as a false spike in the backend's
+// anomaly detection. NAN until the first successful read of each.
+float lastGoodTemperature = NAN;
+float lastGoodHumidity = NAN;
+float lastGoodDistance = NAN;
+
 float readDistanceCm() {
   digitalWrite(ULTRASONIC_TRIG_PIN, LOW);
   delayMicroseconds(2);
@@ -82,10 +97,30 @@ void sendReading() {
   int soundLevel = analogRead(MIC_ANALOG_PIN);
   bool beamBroken = digitalRead(BEAM_BREAK_PIN) == HIGH; // confirmed polarity: LOW=intact, HIGH=broken
 
-  if (isnan(temperature) || isnan(humidity)) {
-    Serial.println("DHT22 read failed — skipping this cycle");
+  bool dhtOk = !isnan(temperature) && !isnan(humidity);
+  if (dhtOk) {
+    lastGoodTemperature = temperature;
+    lastGoodHumidity = humidity;
+  } else {
+    temperature = lastGoodTemperature;
+    humidity = lastGoodHumidity;
+  }
+
+  bool hcsr04Ok = distance > 0;
+  if (hcsr04Ok) {
+    lastGoodDistance = distance;
+  } else {
+    distance = lastGoodDistance;
+  }
+
+  if (isnan(temperature) || isnan(humidity) || isnan(distance)) {
+    // No good reading yet for at least one sensor (e.g. right at boot) —
+    // nothing sane to send or fall back to.
+    Serial.println("No valid reading yet for at least one sensor — skipping this cycle");
     return;
   }
+
+  bool networkOk = WiFi.status() == WL_CONNECTED;
 
   String body = "node_id=" + urlEncode(NODE_ID) +
                 "&temperature=" + String(temperature, 1) +
@@ -94,7 +129,15 @@ void sendReading() {
                 "&sound=" + String(soundLevel) +
                 "&beam_status=" + urlEncode(beamBroken ? "broken" : "normal") +
                 "&latitude=" + String(NODE_LAT, 6) +
-                "&longitude=" + String(NODE_LON, 6);
+                "&longitude=" + String(NODE_LON, 6) +
+                "&esp32_online=true" +
+                "&dht11_status=" + urlEncode(dhtOk ? "OK" : "FAIL") +
+                "&hcsr04_status=" + urlEncode(hcsr04Ok ? "OK" : "FAIL") +
+                // The beam-break module has no independent self-test line, so
+                // this can't detect its own hardware failure — only whether
+                // it's producing a signal at all, which it is if we got here.
+                "&ir_beam_status=OK" +
+                "&network_status=" + urlEncode(networkOk ? "CONNECTED" : "DISCONNECTED");
 
   HTTPClient http;
   String endpoint = String("http://") + BACKEND_HOST + ":" + BACKEND_PORT + "/api/sensor-data";

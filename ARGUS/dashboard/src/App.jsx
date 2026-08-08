@@ -1,22 +1,35 @@
-import { Header } from "./components/Header";
-import { ConnectionPanel } from "./components/ConnectionPanel";
-import { CameraFeed } from "./components/CameraFeed";
-import { DetectionLog } from "./components/DetectionLog";
-import { SensorPanel } from "./components/SensorPanel";
-import { useBackendData } from "./hooks/useBackendData";
+import { ArgusHeader } from "./components/argus/ArgusHeader";
+import { NodeMap } from "./components/argus/NodeMap";
+import { NodePanel } from "./components/argus/NodePanel";
+import { SensorCards } from "./components/argus/SensorCards";
+import { RiskEvolutionChart } from "./components/argus/RiskEvolutionChart";
+import { AIExplanation } from "./components/argus/AIExplanation";
+import { DeviceHealthPanel } from "./components/argus/DeviceHealthPanel";
+import { CameraObservationPanel } from "./components/argus/CameraObservationPanel";
+import { useAuthorityData } from "./hooks/useAuthorityData";
 import "./App.css";
 
+const BACKEND_URL = "http://localhost:8000"; // change if the backend runs elsewhere
+
 export default function App() {
-  const { status, sensorReadings, detections, latestImageUrl, connect } = useBackendData();
+  const {
+    status, nodes, alerts,
+    selectedNodeId, setSelectedNodeId, selectedNode,
+    nodeRiskHistory, latestRisk,
+    latestReading, previousReading, latestObservation, deviceHealth,
+  } = useAuthorityData(BACKEND_URL);
 
   return (
     <div className="app">
-      <Header status={status} />
-      <main className="grid">
-        <ConnectionPanel status={status} onConnect={connect} />
-        <CameraFeed imageUrl={latestImageUrl} detection={detections[0]} />
-        <SensorPanel readings={sensorReadings} />
-        <DetectionLog detections={detections} />
+      <ArgusHeader status={status} nodes={nodes} alerts={alerts} />
+      <main className="argus-grid">
+        <NodeMap nodes={nodes} selectedNodeId={selectedNodeId} onSelect={setSelectedNodeId} />
+        <NodePanel node={selectedNode} latestRisk={latestRisk} />
+        <SensorCards latestReading={latestReading} previousReading={previousReading} />
+        <RiskEvolutionChart riskHistory={nodeRiskHistory} />
+        <AIExplanation latestRisk={latestRisk} />
+        <DeviceHealthPanel deviceHealth={deviceHealth} hasSelection={!!selectedNode} />
+        <CameraObservationPanel observation={latestObservation} backendUrl={BACKEND_URL} />
       </main>
     </div>
   );
