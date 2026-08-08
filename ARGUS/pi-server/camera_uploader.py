@@ -9,14 +9,16 @@ False on every upload as a placeholder. If real detection for these matters
 for the demo, it needs either a custom-trained model or a different
 detection approach — out of scope to add here without a decision on which.
 """
+import os
 import time
 
 import cv2
 import requests
 from ultralytics import YOLO
 
-BACKEND_URL = "http://localhost:8000"  # change to the backend's actual address
-NODE_ID = "ARGUS-01"  # match this to whatever node_id the rest of the team uses
+BACKEND_URL = os.environ.get("BACKEND_URL", "http://localhost:8000")
+NODE_ID = os.environ.get("NODE_ID", "ARGUS-01")
+CAMERA_INDEX = int(os.environ.get("CAMERA_INDEX", "0"))
 UPLOAD_INTERVAL_S = 5  # how often to send a snapshot — every frame would overload the backend
 CONFIDENCE_THRESHOLD = 0.5
 
@@ -59,7 +61,7 @@ def capture_and_upload(cap):
 
 
 def main():
-    cap = cv2.VideoCapture(0)
+    cap = cv2.VideoCapture(CAMERA_INDEX)
     if not cap.isOpened():
         raise RuntimeError("Could not open camera")
 

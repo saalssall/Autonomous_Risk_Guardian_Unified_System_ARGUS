@@ -1,4 +1,5 @@
-fastapi
-uvicorn[standard]
-sqlalchemy
-python-multipart
+opencv-python
+ultralytics
+websockets
+aiohttp
+requests
