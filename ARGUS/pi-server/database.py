@@ -1,98 +1,47 @@
 import sqlite3
 import json
 
-DB_FILE = "argus.db"
+DB_NAME = "argus_telementry.db"
 
-def get_db_connection():
-    conn = sqlite3.connect(DB_FILE)
+def get_connection():
+    conn = sqlite3.connect(DB_NAME)
     conn.row_factory = sqlite3.Row
     return conn
 
-def insert_sensor_telemetry(data: dict):
-    """Inserts raw telemetry payload into local SQLite database."""
-    conn = get_db_connection()
+def init_db():
+    conn = get_connection()
     cursor = conn.cursor()
-    
-    # Convert device_health dict to a JSON string for SQLite storage
-    device_health_str = json.dumps(data.get("device_health", {}))
-    
     cursor.execute("""
-        INSERT INTO sensor_telemetry (node_id, temperature, humidity, distance, device_health, status)
-        VALUES (?, ?, ?, ?, ?, ?)
-    """, (
-        data.get("node_id"),
-        data.get("temperature"),
-        data.get("humidity"),
-        data.get("distance"),
-        device_health_str,
-        data.get("status", "normal")
-    ))
-    
+        CREATE TABLE IF NOT EXISTS sensor_telemetry (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp TEXT DEFAULT CURRENT_TIMESTAMP,
+            node_id TEXT NOT NULL,
+            temperature REAL NOT NULL,
+            humidity REAL NOT NULL,
+            distance REAL NOT NULL,
+            device_health TEXT NOT NULL,
+            health_percentage REAL NOT NULL,
+            spatial_agreement REAL DEFAULT 100.0,
+            status TEXT DEFAULT 'normal'
+        )
+    """)
     conn.commit()
     conn.close()
 
-def get_latest_telemetry(node_id: str):
-    """Retrieves the most recent record for a specific node from SQLite."""
-    conn = get_db_connection()
+def insert_telemetry(node_id, temperature, humidity, distance, device_health, health_percentage, spatial_agreement, status='normal'):
+    conn = get_connection()
     cursor = conn.cursor()
-    
     cursor.execute("""
-        SELECT * FROM sensor_telemetry 
-        WHERE node_id = ? 
-        ORDER BY timestamp DESC 
-        LIMIT 1
-    """, (node_id,))
-    row = cursor.fetchone()
+        INSERT INTO sensor_telemetry (node_id, temperature, humidity, distance, device_health, health_percentage, spatial_agreement, status)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    """, (node_id, temperature, humidity, distance, json.dumps(device_health), health_percentage, spatial_agreement, status))
+    conn.commit()
     conn.close()
-    
-    if row:
-        data = dict(row)
-        if data.get("device_health"):
-            data["device_health"] = json.loads(data["device_health"])
-        return data
-    return None
 
-def get_node_history(node_id: str, limit: int = 50):
-    """Retrieves historical sensor telemetry for trend analysis."""
-    conn = get_db_connection()
+def fetch_latest_telemetry(limit=50):
+    conn = get_connection()
     cursor = conn.cursor()
-    
-    cursor.execute("""
-        SELECT * FROM sensor_telemetry 
-        WHERE node_id = ? 
-        ORDER BY timestamp DESC 
-        LIMIT ?
-    """, (node_id, limit))
+    cursor.execute("SELECT * FROM sensor_telemetry ORDER BY id DESC LIMIT ?", (limit,))
     rows = cursor.fetchall()
     conn.close()
-    
-    history = []
-    for row in rows:
-        data = dict(row)
-        if data.get("device_health"):
-            data["device_health"] = json.loads(data["device_health"])
-        history.append(data)
-        
-    return history[::-1] # Return in chronological order
-
-def get_all_active_nodes():
-    """Retrieves the latest state for active nodes."""
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    
-    cursor.execute("""
-        SELECT * FROM sensor_telemetry 
-        ORDER BY timestamp DESC 
-        LIMIT 20
-    """)
-    rows = cursor.fetchall()
-    conn.close()
-    
-    nodes = []
-    for row in rows:
-        data = dict(row)
-        if data.get("device_health"):
-            data["device_health"] = json.loads(data["device_health"])
-        nodes.append(data)
-        
-    return nodes
+    return [dict(row) for row in rows]
