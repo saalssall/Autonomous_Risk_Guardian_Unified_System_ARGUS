@@ -1,6 +1,6 @@
 # ARGUS — Autonomous Risk Guardian Unified System
 
-ARGUS is a disaster-response sensor platform built for an AI/ML hackathon. It combines edge sensor nodes, on-device computer vision, and a rolling-baseline risk engine to flag anomalous conditions (temperature spikes, structural shifts, presence of people) at a monitored site, and surfaces it all on a live dashboard with AI-generated explanations of what's happening and why.
+ARGUS is a disaster-response sensor platform built for Brains and Bots hackathon 2026 at Queensland University of Technology. It combines edge sensor nodes, on-device computer vision, and a rolling-baseline risk engine to flag anomalous conditions (temperature spikes, structural shifts, presence of people) at a monitored site, and surfaces it all on a live dashboard with AI-generated explanations of what's happening and why.
 
 > ⚠️ **Hackathon project** — built for a demo, not production. See [Known Limitations](#known-limitations) before relying on this for anything real.
 
