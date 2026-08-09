@@ -1,0 +1,28 @@
+remote: This repository moved. Please use the new location:        
+remote:   https://github.com/saalssall/Autonomous_Risk_Guardian_Unified_System_ARGUS.git        
+remote: error: GH013: Repository rule violations found for refs/heads/feat/risk-engine-device-health.        
+remote: 
+remote: - GITHUB PUSH PROTECTION        
+remote:   —————————————————————————————————————————        
+remote:     Resolve the following violations before pushing again        
+remote: 
+remote:     - Push cannot contain secrets        
+remote: 
+remote:             
+remote:      (?) Learn how to resolve a blocked push        
+remote:      https://docs.github.com/code-security/secret-scanning/working-with-secret-scanning-and-push-protection/working-with-push-protection-from-the-command-line#resolving-a-blocked-push        
+remote:             
+remote:             
+remote:       —— GCP API Key Bound to a Service Account ————————————        
+remote:        locations:        
+remote:          - commit: cc88dbf2b4e3849f5bfe7f8ecf39ed063eb4b0b3        
+remote:            path: ARGUS/backend/.env:5        
+remote:             
+remote:        (?) To push, remove secret from commit(s) or follow this URL to allow the secret.        
+remote:        https://github.com/saalssall/Autonomous_Risk_Guardian_Unified_System_ARGUS/security/secret-scanning/unblock-secret/3HeoOT5W6mbJkXAc1TyxUo7zb8U        
+remote:             
+remote: 
+remote: 
+To https://github.com/saalssall/AI-ML-Hackathon-.git
+ ! [remote rejected] feat/risk-engine-device-health -> feat/risk-engine-device-health (push declined due to repository rule violations)
+error: failed to push some refs to 'https://github.com/saalssall/AI-ML-Hackathon-.git'
