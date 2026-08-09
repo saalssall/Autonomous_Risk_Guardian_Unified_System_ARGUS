@@ -1,6 +1,6 @@
 # ARGUS — Autonomous Risk Guardian Unified System
 
-ARGUS is a disaster-response sensor platform built for QUT Brains & Bots hackathon 2026. It combines edge sensor nodes, on-device computer vision, and a rolling-baseline risk engine to flag anomalous conditions (temperature spikes, structural shifts, presence of people) at a monitored site, and surfaces it all on a live dashboard with AI-generated explanations of what's happening and why.
+ARGUS is a disaster-response sensor platform built for an AI/ML hackathon. It combines edge sensor nodes, on-device computer vision, and a rolling-baseline risk engine to flag anomalous conditions (temperature spikes, structural shifts, presence of people) at a monitored site, and surfaces it all on a live dashboard with AI-generated explanations of what's happening and why.
 
 > ⚠️ **Hackathon project** — built for a demo, not production. See [Known Limitations](#known-limitations) before relying on this for anything real.
 
@@ -17,6 +17,7 @@ ARGUS is a disaster-response sensor platform built for QUT Brains & Bots hackath
   - [Dashboard](#4-dashboard-reactvite)
 - [API reference](#api-reference)
 - [Risk engine](#risk-engine)
+- [Node geolocation](#node-geolocation)
 - [Environment variables](#environment-variables)
 - [Known limitations](#known-limitations)
 - [Roadmap](#roadmap)
@@ -35,7 +36,7 @@ ARGUS is a disaster-response sensor platform built for QUT Brains & Bots hackath
 └─────────────┘                              │                  │      └─────────────┘
                                               │  • risk_engine   │
 ┌─────────────┐    snapshot + detections     │  • ai_explainer  │
-│ Raspberry Pi│ ──────────────────────────▶  │    (Claude)      │
+│ Raspberry Pi│ ──────────────────────────▶  │    (Gemini)      │
 │  + Camera   │      POST /api/image         │                  │
 │  Module     │                              └──────────────────┘
 │  (YOLOv8n)  │                                        ▲
@@ -158,6 +159,8 @@ Run the detection/upload script:
 ```bash
 export BACKEND_URL=http://<backend-host-ip>:8000
 export NODE_ID=ARGUS-01
+export NODE_LATITUDE=-27.4772    # this node's real-world coordinates —
+export NODE_LONGITUDE=153.0283   # see "Node geolocation" below for why this matters
 python detect_server.py
 ```
 
@@ -227,12 +230,29 @@ Risk is computed per-node, per-reading, using rolling z-score baselines against 
 
 Each new sensor reading *or* camera observation immediately triggers a recomputed assessment for that node — risk isn't batch-processed on a timer.
 
+## Node geolocation
+
+New nodes get their map coordinates from whichever POST reaches the backend first (`/api/sensor-data` or `/api/image`). If neither includes `latitude`/`longitude`, the backend falls back to `(0.0, 0.0)` — "Null Island," off the coast of West Africa — which puts that node nowhere near the others on the dashboard map.
+
+To avoid this:
+- Set `NODE_LATITUDE`/`NODE_LONGITUDE` on the Pi (see [Raspberry Pi camera node](#2-raspberry-pi-camera-node)) before its first upload for a given `node_id`.
+- Or seed the node ahead of time via `seed.py` with correct coordinates.
+
+**If a node is already stuck at the wrong coordinates**, run `backend/fix_node_coordinates.py` — a one-off script that patches every existing node's `latitude`/`longitude` in `argus.db` to cluster around a known base location:
+```bash
+cd backend
+source venv/bin/activate
+python fix_node_coordinates.py
+```
+Edit `BASE_LATITUDE`/`BASE_LONGITUDE` at the top of that script to match your actual demo site before running it.
+
 ## Environment variables
 
 | Variable | Used by | Default | Purpose |
 |---|---|---|---|
 | `BACKEND_URL` | Pi, ESP32 | `http://localhost:8000` | Where to POST sensor/image data |
 | `NODE_ID` | Pi | `ARGUS-01` | Identifies this node's uploads |
+| `NODE_LATITUDE` / `NODE_LONGITUDE` | Pi | — | This node's real-world coordinates, sent with every image upload — see [Node geolocation](#node-geolocation) |
 | `ARGUS_UPLOAD_DIR` | Backend | `uploads` | Where camera snapshots are persisted on disk |
 | `GEMINI_API_KEY` | Backend | — | Enables `/api/ai-explanation/{node_id}` |
 | `VITE_BACKEND_URL` | Dashboard | `http://localhost:8000` | Where the dashboard fetches data from |
@@ -240,7 +260,6 @@ Each new sensor reading *or* camera observation immediately triggers a recompute
 ## Known limitations
 
 - **Smoke, water, and debris detection are not implemented.** YOLOv8n is trained on COCO, which has no classes for any of these. The `/api/image` endpoint currently sends `smoke`, `water`, and `debris` as `False` on every upload as a placeholder. Real detection for these would need either a custom-trained model or a different detection approach.
-- **Single-camera-frame filename collisions across nodes** — resolved by keying uploaded filenames with `NODE_ID`, but worth double-checking if you add more nodes.
 - **No authentication** on the backend API — fine for a local hackathon demo, not for anything exposed publicly. CORS is currently wide open (`allow_origins=["*"]`).
 - **AI explanations are on-demand only**, not run automatically on every reading, to avoid unnecessary LLM calls (~every 2 seconds would be both slow and expensive).
 
