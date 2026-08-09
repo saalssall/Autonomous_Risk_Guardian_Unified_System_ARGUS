@@ -35,7 +35,7 @@ ARGUS is a disaster-response sensor platform built for an AI/ML hackathon. It co
 └─────────────┘                              │                  │      └─────────────┘
                                               │  • risk_engine   │
 ┌─────────────┐    snapshot + detections     │  • ai_explainer  │
-│ Raspberry Pi│ ──────────────────────────▶  │    (Gemini)      │
+│ Raspberry Pi│ ──────────────────────────▶  │    (Claude)      │
 │  + Camera   │      POST /api/image         │                  │
 │  Module     │                              └──────────────────┘
 │  (YOLOv8n)  │                                        ▲
@@ -59,7 +59,7 @@ Each physical node (ESP32 + Pi, co-located) reports independently to the backend
 |---|---|---|
 | **ESP32 firmware** | PlatformIO / C++ | Reads DHT11 (temp/humidity), HC-SR04 (distance/structural shift), IR beam (obstruction), reports device health, POSTs to backend |
 | **Raspberry Pi server** | Python, OpenCV, Ultralytics YOLOv8n, Picamera2 | Captures camera frames, runs person detection, POSTs snapshots + detection flags to backend |
-| **Backend** | FastAPI, SQLAlchemy | Ingests sensor/image data, runs the risk engine, serves the REST API, generates AI explanations via Claude |
+| **Backend** | FastAPI, SQLAlchemy | Ingests sensor/image data, runs the risk engine, serves the REST API, generates AI explanations via Gemini |
 | **Dashboard** | React, Vite | Live view of node status, risk levels, camera snapshots, alerts, and AI-generated situation summaries |
 
 ---
@@ -72,7 +72,7 @@ ARGUS/
 │   ├── main.py                 # FastAPI app, all routes
 │   ├── database.py             # SQLAlchemy models + session
 │   ├── risk_engine.py          # rolling z-score risk computation
-│   ├── ai_explainer.py         # Claude-based explanations
+│   ├── ai_explainer.py         # Gemini-based explanations
 │   ├── fusion.py                # sensor/camera signal fusion
 │   ├── seed.py                  # seed data for demos
 │   ├── requirements.txt
@@ -123,7 +123,7 @@ pip install -r requirements.txt
 
 Create a `.env` file in `backend/` if you want AI explanations enabled:
 ```
-ANTHROPIC_API_KEY=your-key-here
+GEMINI_API_KEY=your-key-here
 ```
 
 Run it:
@@ -212,7 +212,7 @@ All endpoints are served by the FastAPI backend on port `8000` by default.
 | `GET` | `/api/observations/{node_id}` | Camera observations (snapshots + detection flags) for a node |
 | `POST` | `/api/sensor-data` | Ingest a sensor reading from the ESP32; triggers a fresh risk computation |
 | `POST` | `/api/image` | Ingest a camera snapshot + detection flags from the Pi; triggers a fresh risk computation |
-| `POST` | `/api/ai-explanation/{node_id}` | On-demand: ask Claude to explain the current risk state in plain language |
+| `POST` | `/api/ai-explanation/{node_id}` | On-demand: ask Gemini to explain the current risk state in plain language |
 
 Uploaded images are served statically at `/uploads/<filename>`.
 
@@ -234,7 +234,7 @@ Each new sensor reading *or* camera observation immediately triggers a recompute
 | `BACKEND_URL` | Pi, ESP32 | `http://localhost:8000` | Where to POST sensor/image data |
 | `NODE_ID` | Pi | `ARGUS-01` | Identifies this node's uploads |
 | `ARGUS_UPLOAD_DIR` | Backend | `uploads` | Where camera snapshots are persisted on disk |
-| `ANTHROPIC_API_KEY` | Backend | — | Enables `/api/ai-explanation/{node_id}` |
+| `GEMINI_API_KEY` | Backend | — | Enables `/api/ai-explanation/{node_id}` |
 | `VITE_BACKEND_URL` | Dashboard | `http://localhost:8000` | Where the dashboard fetches data from |
 
 ## Known limitations
