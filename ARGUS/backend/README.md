@@ -12,7 +12,8 @@ source venv/bin/activate   # Windows: venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-Copy `.env.example` to `.env` and set `ANTHROPIC_API_KEY` — only needed for
+Copy `.env.example` to `.env` and set `GEMINI_API_KEY` (free, no credit card —
+get one at https://aistudio.google.com/apikey) — only needed for
 `POST /api/ai-explanation/{node_id}`; everything else works without it.
 
 ## Running
@@ -31,7 +32,7 @@ to demo against: `python3 seed.py`.
 |---|---|---|
 | POST | `/api/sensor-data` | ESP32 posts a sensor reading here |
 | POST | `/api/image` | Camera pipeline posts a snapshot + detection flags here |
-| POST | `/api/ai-explanation/{node_id}` | Calls Claude to explain the node's latest risk assessment in plain language. Needs `ANTHROPIC_API_KEY` set (see `.env.example`) |
+| POST | `/api/ai-explanation/{node_id}` | Calls Gemini (free tier) to explain the node's latest risk assessment in plain language. Needs `GEMINI_API_KEY` set (see `.env.example`) |
 | GET | `/api/nodes` | List all known nodes |
 | GET | `/api/nodes/{node_id}` | One node's status/battery/location |
 | GET | `/api/history/{node_id}` | Recent sensor readings for a node |

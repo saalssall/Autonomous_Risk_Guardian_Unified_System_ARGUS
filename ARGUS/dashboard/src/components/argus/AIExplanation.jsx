@@ -39,12 +39,12 @@ export function AIExplanation({ latestRisk, backendUrl, nodeId }) {
 
           <div className="ai-llm-section">
             <button onClick={fetchAiExplanation} disabled={loading || !nodeId}>
-              {loading ? "Asking Claude…" : aiResult ? "Regenerate AI explanation" : "Get AI explanation"}
+              {loading ? "Asking Gemini…" : aiResult ? "Regenerate AI explanation" : "Get AI explanation"}
             </button>
             {error && <p className="connection-error">{error}</p>}
             {aiResult && (
               <div className="ai-llm-result">
-                <span className="eyebrow">AI explanation (Claude)</span>
+                <span className="eyebrow">AI explanation (Gemini)</span>
                 <p>{aiResult.summary}</p>
                 <ul>
                   {aiResult.key_evidence.map((item, i) => (
