@@ -1,33 +1,38 @@
 import { useState } from "react";
 
-// This backend only stores periodic snapshot uploads (POST /api/image), not
-// a live stream — so this shows the latest snapshot, refreshed each poll,
-// rather than continuous video like the earlier WebSocket-based version did.
-export function CameraFeed({ imageUrl, detection }) {
+// Now backed by the Pi's live MJPEG stream (see detect_server.py's /stream
+// endpoint) instead of polling stored snapshots — the <img> tag renders an
+// MJPEG multipart stream natively, so this updates continuously with no
+// polling logic needed.
+export function CameraFeed({ streamUrl, detection }) {
   const [errored, setErrored] = useState(false);
 
   return (
     <section className="camera-panel panel">
-      <p className="eyebrow">Latest snapshot</p>
+      <p className="eyebrow">Live feed</p>
 
       <div className="camera-frame">
-        {imageUrl && !errored ? (
+        {streamUrl && !errored ? (
           <img
-            key={imageUrl}
-            src={imageUrl}
-            alt="Latest ARGUS camera snapshot"
+            key={streamUrl}
+            src={streamUrl}
+            alt="ARGUS live camera feed"
             onError={() => setErrored(true)}
           />
         ) : (
           <div className="feed-placeholder">
             <span>◉</span>
-            <p>Waiting for the first camera upload from this node.</p>
+            <p>
+              {errored
+                ? "Camera feed unreachable — check the node's connection."
+                : "Waiting for the camera stream from this node."}
+            </p>
           </div>
         )}
       </div>
 
       <div className="feed-meta">
-        <span>Captured: {imageUrl ? "latest snapshot" : "—"}</span>
+        <span>{streamUrl && !errored ? "Streaming" : "—"}</span>
         <strong>
           {detection
             ? `${detection.label} · ${Math.round((detection.confidence ?? 0) * 100)}%`
