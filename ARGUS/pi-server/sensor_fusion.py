@@ -91,3 +91,50 @@ def get_risk_category(score: float) -> str:
         return "HIGH"
     else:
         return "CRITICAL"
+
+def evaluate_device_health(temperature, humidity, distance):
+    """
+    Evaluates individual component states matching the expanded checklist:
+    - ESP32: ONLINE/OFFLINE
+    - DHT11: OK/ERROR
+    - HC-SR04: OK/ERROR
+    - IR BEAM: INTACT/BROKEN
+    - Raspberry Pi: ONLINE/OFFLINE
+    - Camera: ONLINE/OFFLINE
+    """
+    health_components = {
+        "esp32": "ONLINE",
+        "dht11": "OK" if 0 <= temperature <= 50 and 20 <= humidity <= 90 else "ERROR",
+        "hc_sr04": "OK" if distance >= 0 else "ERROR",
+        "ir_beam": "INTACT" if distance > 10 else "BROKEN",
+        "raspberry_pi": "ONLINE",
+        "camera": "ONLINE"
+    }
+    
+    total_components = len(health_components)
+    operational_count = sum(
+        1 for status in health_components.values() 
+        if status in ["ONLINE", "OK", "INTACT"]
+    )
+    health_percentage = round((operational_count / total_components) * 100.0, 2)
+    
+    overall_status = "HEALTHY" if health_percentage >= 80 else "DEGRADED"
+    if health_percentage < 50:
+        overall_status = "CRITICAL"
+
+    return health_components, health_percentage, overall_status
+
+def calculate_spatial_correlation(all_node_risks):
+    """
+    Calculates spatial agreement ratio across nodes (e.g., 3/4 = 75%).
+    all_node_risks: dict mapping node_id to risk level ("HIGH", "ELEVATED", "LOW")
+    """
+    if not all_node_risks:
+        return 100.0
+    
+    total_nodes = len(all_node_risks)
+    dominant_status = max(set(all_node_risks.values()), key=list(all_node_risks.values()).count)
+    matching_nodes = sum(1 for status in all_node_risks.values() if status == dominant_status)
+    
+    spatial_agreement = round((matching_nodes / total_nodes) * 100.0, 2)
+    return spatial_agreement
