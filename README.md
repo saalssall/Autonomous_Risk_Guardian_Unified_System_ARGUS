@@ -35,7 +35,7 @@ ARGUS is a disaster-response sensor platform built for an AI/ML hackathon. It co
 └─────────────┘                              │                  │      └─────────────┘
                                               │  • risk_engine   │
 ┌─────────────┐    snapshot + detections     │  • ai_explainer  │
-│ Raspberry Pi│ ──────────────────────────▶  │    (Claude)      │
+│ Raspberry Pi│ ──────────────────────────▶  │    (Gemini)      │
 │  + Camera   │      POST /api/image         │                  │
 │  Module     │                              └──────────────────┘
 │  (YOLOv8n)  │                                        ▲
