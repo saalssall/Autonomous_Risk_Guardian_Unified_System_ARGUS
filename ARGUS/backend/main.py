@@ -2,11 +2,15 @@ from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
+from dotenv import load_dotenv
 import shutil
 import os
 import datetime
 import database
 import risk_engine
+import ai_explainer
+
+load_dotenv()  # picks up .env in this folder, e.g. ANTHROPIC_API_KEY — no-op if the file doesn't exist
 
 app = FastAPI(title="Argus Disaster Recovery API", version="1.0")
 
@@ -251,3 +255,65 @@ def ingest_image(
         risk_engine.compute_risk_assessment(db, node_id, latest_reading)
 
     return {"status": "success", "message": "Camera observation and image logged successfully."}
+
+
+def _build_ai_payload(db: Session, node_id: str):
+    """Compact payload for the AI to interpret — current state + changes +
+    risk + confidence + trend + device health, per the spec. Never includes
+    raw sensor history or a long reading list."""
+    assessment = db.query(database.RiskAssessmentModel)\
+        .filter(database.RiskAssessmentModel.node_id == node_id)\
+        .order_by(database.RiskAssessmentModel.timestamp.desc()).first()
+    if assessment is None:
+        return None
+
+    readings = db.query(database.SensorReadingModel)\
+        .filter(database.SensorReadingModel.node_id == node_id)\
+        .order_by(database.SensorReadingModel.timestamp.desc())\
+        .limit(risk_engine.BASELINE_WINDOW + 1).all()
+    if not readings:
+        return None
+    latest = readings[0]
+    oldest = readings[-1] if len(readings) > 1 else None
+
+    def rate_str(current, oldest_value, unit):
+        if oldest_value is None:
+            return "no recent trend data"
+        rate = risk_engine._real_rate_per_30min(current, oldest_value, latest.timestamp, oldest.timestamp)
+        if rate is None:
+            return "no recent trend data"
+        sign = "+" if rate > 0 else ""
+        return f"{sign}{rate:.1f}{unit} / 30min"
+
+    device_health = _compute_node_status(
+        latest.esp32_online, latest.dht11_status, latest.hcsr04_status,
+        latest.ir_beam_status, latest.network_status,
+    )
+
+    return {
+        "node": node_id,
+        "risk_score": assessment.risk_score,
+        "risk_level": assessment.risk_level,
+        "confidence": assessment.confidence,
+        "trend": assessment.trend,
+        "temperature_change": rate_str(latest.temperature, oldest.temperature if oldest else None, "C"),
+        "humidity_change": rate_str(latest.humidity, oldest.humidity if oldest else None, "%"),
+        "distance_change": rate_str(latest.distance, oldest.distance if oldest else None, "cm"),
+        "device_health": device_health,
+    }
+
+
+@app.post("/api/ai-explanation/{node_id}")
+def get_ai_explanation(node_id: str, db: Session = Depends(get_db)):
+    """ADDED — calls Claude to interpret the already-computed risk
+    assessment into a short human-readable explanation. Deliberately a
+    separate, on-demand endpoint rather than wired into every sensor POST:
+    calling an LLM on every ~2s reading would be slow and needlessly
+    expensive. The dashboard should call this only when the user asks for it."""
+    payload = _build_ai_payload(db, node_id)
+    if payload is None:
+        raise HTTPException(status_code=404, detail="No data for this node yet")
+    try:
+        return ai_explainer.generate_ai_explanation(payload)
+    except Exception as error:
+        raise HTTPException(status_code=502, detail=f"AI explanation failed: {error}")

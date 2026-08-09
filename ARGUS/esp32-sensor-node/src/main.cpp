@@ -30,8 +30,8 @@
 #include <DHT.h>
 
 // ---- Wi-Fi + backend connection — fill these in ----
-const char* WIFI_SSID = "your-network";
-const char* WIFI_PASSWORD = "your-password";
+const char* WIFI_SSID = "Hamidullah";
+const char* WIFI_PASSWORD = "AI/ML2026";
 const char* BACKEND_HOST = "raspberrypi.local"; // or the backend's IP address
 const uint16_t BACKEND_PORT = 8000;             // FastAPI/uvicorn default
 

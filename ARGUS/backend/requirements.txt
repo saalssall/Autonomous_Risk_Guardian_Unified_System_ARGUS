@@ -2,3 +2,6 @@ fastapi
 uvicorn[standard]
 sqlalchemy
 python-multipart
+google-genai
+pydantic
+python-dotenv
